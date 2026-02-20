@@ -514,9 +514,13 @@ function renderMarkdown(text) {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Links (only allow http/https to prevent javascript: XSS)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+    if (/^https?:\/\//i.test(url)) {
+      return '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>';
+    }
+    return text + ' (' + url + ')';
+  });
 
   // Blockquotes
   html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
