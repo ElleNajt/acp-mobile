@@ -1,5 +1,7 @@
 # acp-mobile
 
+> **WIP** — This is a work in progress and meant only to run locally at the moment.
+
 Mobile web UI for [ACP](https://github.com/anthropics/acp) sessions running through [acp-multiplex](https://github.com/ElleNajt/acp-multiplex).
 
 Discovers all live acp-multiplex sockets on the machine, shows them grouped by project, and lets you chat with any session from your phone.
