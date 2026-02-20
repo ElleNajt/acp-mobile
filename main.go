@@ -64,9 +64,23 @@ func main() {
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
 
+	// Wrap mux with DNS rebinding protection: only accept requests
+	// with Host header matching localhost or 127.0.0.1.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if host != "127.0.0.1" && host != "localhost" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+
 	addr := fmt.Sprintf("127.0.0.1:%s", port)
 	log.Printf("acp-mobile: http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, handler))
 }
 
 // --- Socket discovery ---
