@@ -834,6 +834,10 @@ function flushReplay() {
     }
 
     // Notifications
+    if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
+      headerTitle.textContent = msg.params.name;
+      continue;
+    }
     if (msg.method !== 'session/update' || !msg.params) continue;
     const update = msg.params.update;
     if (!update) continue;
@@ -943,6 +947,12 @@ function handleMessage(msg) {
       // Mark last sent user message as delivered
       if (lastSentMsg) { markSent(lastSentMsg); lastSentMsg = null; }
     }
+    return;
+  }
+
+  // Buffer name from acp-multiplex
+  if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
+    headerTitle.textContent = msg.params.name;
     return;
   }
 
@@ -1242,8 +1252,8 @@ function renderSessions(sessions) {
     for (let i = 0; i < group.length; i++) {
       const s = group[i];
       const suffix = group.length > 1 ? (i === 0 ? '' : '<' + (i + 1) + '>') : '';
-      const agentName = (s.title || 'Claude Code') + ' Agent';
-      const bufferName = agentName + ' @ ' + proj + suffix;
+      const bufferName = s.bufferName
+        || ((s.title || 'Claude Code') + ' Agent @ ' + proj + suffix);
 
       const d = document.createElement('div');
       d.className = 'session-card';

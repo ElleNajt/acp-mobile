@@ -146,11 +146,12 @@ func findSocket(pidStr string) string {
 // --- Session probing ---
 
 type sessionInfo struct {
-	Pid       int    `json:"pid"`
-	SessionID string `json:"sessionId,omitempty"`
-	Title     string `json:"title,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	Project   string `json:"project,omitempty"`
+	Pid        int    `json:"pid"`
+	SessionID  string `json:"sessionId,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Cwd        string `json:"cwd,omitempty"`
+	Project    string `json:"project,omitempty"`
+	BufferName string `json:"bufferName,omitempty"`
 }
 
 func handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -228,8 +229,25 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 
 				var msg struct {
 					Result json.RawMessage `json:"result"`
+					Method string          `json:"method"`
+					Params json.RawMessage `json:"params"`
 				}
-				if json.Unmarshal(line, &msg) != nil || msg.Result == nil {
+				if json.Unmarshal(line, &msg) != nil {
+					continue
+				}
+
+				// Check for acp-multiplex/meta notification
+				if msg.Method == "acp-multiplex/meta" && msg.Params != nil {
+					var meta struct {
+						Name string `json:"name"`
+					}
+					if json.Unmarshal(msg.Params, &meta) == nil && meta.Name != "" {
+						info.BufferName = meta.Name
+					}
+					continue
+				}
+
+				if msg.Result == nil {
 					continue
 				}
 
