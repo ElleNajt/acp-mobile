@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,11 +24,74 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+type tailscaleInfo struct {
+	Hostname string
+	IP       string
+}
+
+func tailscaleSelf() (tailscaleInfo, error) {
+	out, err := exec.Command("tailscale", "status", "--self", "--json").Output()
+	if err != nil {
+		return tailscaleInfo{}, err
+	}
+	var status struct {
+		Self struct {
+			DNSName      string   `json:"DNSName"`
+			TailscaleIPs []string `json:"TailscaleIPs"`
+		} `json:"Self"`
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return tailscaleInfo{}, err
+	}
+	name := strings.TrimSuffix(status.Self.DNSName, ".")
+	if name == "" {
+		return tailscaleInfo{}, fmt.Errorf("no tailscale hostname")
+	}
+	var ip string
+	for _, addr := range status.Self.TailscaleIPs {
+		if strings.Contains(addr, ".") {
+			ip = addr
+			break
+		}
+	}
+	return tailscaleInfo{Hostname: name, IP: ip}, nil
+}
+
+func authKeyPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".acp-mobile", "authkey")
+}
+
+func loadOrCreateAuthKey() string {
+	p := authKeyPath()
+	data, err := os.ReadFile(p)
+	if err == nil {
+		key := strings.TrimSpace(string(data))
+		if key != "" {
+			return key
+		}
+	}
+	// Generate new key
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("failed to generate authkey: %v", err)
+	}
+	key := hex.EncodeToString(b)
+	os.MkdirAll(filepath.Dir(p), 0700)
+	if err := os.WriteFile(p, []byte(key+"\n"), 0600); err != nil {
+		log.Fatalf("failed to write authkey: %v", err)
+	}
+	log.Printf("generated new authkey at %s", p)
+	return key
+}
+
 func main() {
 	port := "8090"
 	if len(os.Args) > 1 {
 		port = os.Args[1]
 	}
+
+	authKey := loadOrCreateAuthKey()
 
 	mux := http.NewServeMux()
 
@@ -46,6 +113,11 @@ func main() {
 				ws.Close()
 				return
 			}
+			if _, err := strconv.Atoi(pid); err != nil {
+				log.Printf("ws: invalid sock param %q", pid)
+				ws.Close()
+				return
+			}
 			sockPath := findSocket(pid)
 			if sockPath == "" {
 				log.Printf("ws: no socket for pid %s", pid)
@@ -55,6 +127,14 @@ func main() {
 			bridgeWebSocket(ws, sockPath)
 		},
 		Handshake: func(config *websocket.Config, r *http.Request) error {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return nil
+			}
+			u, err := url.Parse(origin)
+			if err != nil || u.Host != r.Host {
+				return fmt.Errorf("origin %q not allowed", origin)
+			}
 			config.Origin, _ = websocket.Origin(config, r)
 			return nil
 		},
@@ -64,23 +144,86 @@ func main() {
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
 
-	// Wrap mux with DNS rebinding protection: only accept requests
-	// with Host header matching localhost or 127.0.0.1.
+	// CSRF protection via Sec-Fetch-Site headers
+	cop := http.NewCrossOriginProtection()
+
+	// Allowed hosts for DNS rebinding protection
+	allowedHosts := map[string]bool{
+		"127.0.0.1": true,
+		"localhost": true,
+	}
+	ts, tsErr := tailscaleSelf()
+	if tsErr == nil {
+		allowedHosts[ts.Hostname] = true
+		if ts.IP != "" {
+			allowedHosts[ts.IP] = true
+		}
+	}
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// DNS rebinding protection
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
-		if host != "127.0.0.1" && host != "localhost" {
+		if !allowedHosts[host] {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+
+		// Auth: if authkey query param is present and valid, set cookie and redirect
+		if qk := r.URL.Query().Get("authkey"); qk != "" {
+			if subtle.ConstantTimeCompare([]byte(qk), []byte(authKey)) != 1 {
+				http.Error(w, "invalid authkey", http.StatusForbidden)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name:     "authkey",
+				Value:    authKey,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+			// Redirect to strip authkey from URL
+			q := r.URL.Query()
+			q.Del("authkey")
+			r.URL.RawQuery = q.Encode()
+			http.Redirect(w, r, r.URL.String(), http.StatusFound)
+			return
+		}
+
+		// Auth: check cookie
+		cookie, err := r.Cookie("authkey")
+		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(authKey)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		mux.ServeHTTP(w, r)
 	})
 
-	addr := fmt.Sprintf("127.0.0.1:%s", port)
-	log.Printf("acp-mobile: http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, handler))
+	// Write link file
+	link := fmt.Sprintf("http://127.0.0.1:%s?authkey=%s", port, authKey)
+	if tsErr == nil {
+		link = fmt.Sprintf("http://%s:%s?authkey=%s", ts.Hostname, port, authKey)
+	}
+	log.Printf("acp-mobile: %s", link)
+	linkPath := filepath.Join(filepath.Dir(authKeyPath()), "link")
+	os.WriteFile(linkPath, []byte(link+"\n"), 0600)
+
+	wrapped := cop.Handler(handler)
+
+	// Listen on localhost
+	go func() {
+		log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%s", port), wrapped))
+	}()
+	// Listen on Tailscale IP if available
+	if tsErr == nil && ts.IP != "" {
+		log.Printf("acp-mobile: also listening on %s:%s", ts.IP, port)
+		log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%s", ts.IP, port), wrapped))
+	} else {
+		select {}
+	}
 }
 
 // --- Socket discovery ---
@@ -466,6 +609,33 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 
 // --- File browser ---
 
+// allowedRoots returns the cwd of each active session.
+func allowedRoots() []string {
+	socks := discoverSockets()
+	seen := map[string]bool{}
+	var roots []string
+	for _, s := range socks {
+		cwd := processCwd(s.pid)
+		if cwd != "" && !seen[cwd] {
+			seen[cwd] = true
+			roots = append(roots, cwd)
+		}
+	}
+	return roots
+}
+
+// isUnderRoots checks if absPath is under one of the allowed roots.
+func isUnderRoots(absPath string, roots []string) bool {
+	// Ensure absPath has a trailing separator for prefix matching
+	for _, root := range roots {
+		root = filepath.Clean(root) + string(filepath.Separator)
+		if strings.HasPrefix(absPath+string(filepath.Separator), root) {
+			return true
+		}
+	}
+	return false
+}
+
 type fileEntry struct {
 	Name  string `json:"name"`
 	IsDir bool   `json:"isDir"`
@@ -494,6 +664,11 @@ func handleFileList(w http.ResponseWriter, r *http.Request) {
 	absPath, err := filepath.Abs(dirPath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if !isUnderRoots(absPath, allowedRoots()) {
+		http.Error(w, "path not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -550,6 +725,11 @@ func handleFileRead(w http.ResponseWriter, r *http.Request) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if !isUnderRoots(absPath, allowedRoots()) {
+		http.Error(w, "path not allowed", http.StatusForbidden)
 		return
 	}
 

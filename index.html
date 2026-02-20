@@ -514,10 +514,11 @@ function renderMarkdown(text) {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
-  // Links (only allow http/https to prevent javascript: XSS)
+  // Links (only allow http/https, escape quotes to prevent attribute injection)
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
     if (/^https?:\/\//i.test(url)) {
-      return '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>';
+      var safeUrl = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      return '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + text + '</a>';
     }
     return text + ' (' + url + ')';
   });
@@ -1115,7 +1116,8 @@ function fbFormatSize(bytes) {
 }
 
 async function openFileBrowser() {
-  const startPath = projectCwd || '/';
+  if (!projectCwd) return;
+  const startPath = projectCwd;
   fbHistory = [];
   await fbNavigate(startPath);
   fbEl.classList.add('visible');
@@ -1342,7 +1344,7 @@ function selectSession(session) {
   messagesEl.innerHTML = '';
   currentAgentMsg = null;
   sessionId = null;
-  projectCwd = null;
+  projectCwd = session.cwd || null;
   availableModes = [];
   sendBtn.disabled = true;
   setProcessing(false);
