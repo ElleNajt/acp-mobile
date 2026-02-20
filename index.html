@@ -1246,7 +1246,7 @@ function timeAgo(ts) {
 async function loadSessions() {
   navListEl.innerHTML = '<div id="nav-empty">Loading...</div>';
   try {
-    const resp = await fetch(basePath + '/api/sessions');
+    const resp = await fetch(basePath + '/api/sessions', { method: 'POST' });
     if (!resp.ok) {
       // Not in discover mode -- single socket, go straight to chat
       discoverMode = false;

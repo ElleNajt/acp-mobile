@@ -165,6 +165,11 @@ type sessionInfo struct {
 }
 
 func handleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	socks := discoverSockets()
 
 	type result struct {
