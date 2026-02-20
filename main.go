@@ -452,7 +452,20 @@ type fileEntry struct {
 }
 
 func handleFileList(w http.ResponseWriter, r *http.Request) {
-	dirPath := r.URL.Query().Get("path")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Path       string `json:"path"`
+		ShowHidden bool   `json:"showHidden"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	dirPath := req.Path
 	if dirPath == "" {
 		dirPath = "."
 	}
@@ -469,7 +482,7 @@ func handleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	showHidden := r.URL.Query().Get("show_hidden") == "true"
+	showHidden := req.ShowHidden
 	var files []fileEntry
 	for _, e := range entries {
 		name := e.Name()
@@ -495,7 +508,19 @@ func handleFileList(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleFileRead(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.Query().Get("path")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	filePath := req.Path
 	if filePath == "" {
 		http.Error(w, "path required", http.StatusBadRequest)
 		return

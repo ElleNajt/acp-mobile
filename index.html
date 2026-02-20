@@ -1130,11 +1130,12 @@ async function fbNavigate(dirPath) {
   fbPathEl.textContent = shortPath(dirPath);
   fbListEl.innerHTML = '<div style="padding:16px;color:#888">Loading...</div>';
 
-  const params = new URLSearchParams({ path: dirPath });
-  if (fbShowHidden) params.set('show_hidden', 'true');
-
   try {
-    const resp = await fetch(basePath + '/files/list?' + params);
+    const resp = await fetch(basePath + '/files/list', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path: dirPath, showHidden: fbShowHidden })
+    });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     fbCurrentPath = data.path;
@@ -1193,7 +1194,11 @@ async function fbOpenFile(filePath) {
   fbViewerEl.classList.add('visible');
 
   try {
-    const resp = await fetch(basePath + '/files/read?path=' + encodeURIComponent(filePath));
+    const resp = await fetch(basePath + '/files/read', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path: filePath })
+    });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     fbvContentEl.textContent = data.content;
