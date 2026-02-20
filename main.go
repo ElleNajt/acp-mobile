@@ -503,7 +503,6 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 	// when the replay burst is done (no explicit end marker from the proxy).
 	var responses [][]byte
 	var notifications [][]byte
-	const tailSize = 40
 
 	buf := make([]byte, 0, 64*1024)
 	tmp := make([]byte, 256*1024)
@@ -539,20 +538,16 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 
 	conn.SetDeadline(time.Time{})
 
-	// Send trimmed replay: all responses + last N notifications
+	// Send full replay: all responses + all notifications
 	for _, line := range responses {
 		websocket.Message.Send(ws, string(line))
 	}
-	tail := notifications
-	if len(tail) > tailSize {
-		tail = tail[len(tail)-tailSize:]
-	}
-	for _, line := range tail {
+	for _, line := range notifications {
 		websocket.Message.Send(ws, string(line))
 	}
 
-	log.Printf("ws: replay trimmed %d responses + %d/%d notifications",
-		len(responses), len(tail), len(notifications))
+	log.Printf("ws: replay %d responses + %d notifications",
+		len(responses), len(notifications))
 
 	// Bridge live traffic
 	var once sync.Once

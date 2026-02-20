@@ -477,6 +477,8 @@ let availableModes = [];
 let replayMode = false;
 let replayBuffer = [];
 let replayTimer = null;
+let allReplayTurns = [];  // Full history from replay
+let renderedTurnStart = 0; // Index into allReplayTurns of first rendered turn
 const MODE_LABELS = {
   default: 'Ask', acceptEdits: 'Edits', plan: 'Plan',
   dontAsk: "Don't Ask", bypassPermissions: 'YOLO'
@@ -541,6 +543,19 @@ function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function renderDiff(oldStr, newStr) {
+  const oldLines = oldStr.split('\n');
+  const newLines = newStr.split('\n');
+  let html = '';
+  for (const line of oldLines) {
+    html += '<span class="diff-removed">- ' + escHtml(line) + '</span>\n';
+  }
+  for (const line of newLines) {
+    html += '<span class="diff-added">+ ' + escHtml(line) + '</span>\n';
+  }
+  return html;
+}
+
 function shortPath(p) {
   return p ? p.replace(/^\/Users\/[^/]+/, '~') : '';
 }
@@ -598,11 +613,6 @@ function addToolMsg(toolName, params) {
   d.className = 'msg tool';
   d.id = 'msg-' + (++msgIdCounter);
 
-  // Detect file operations
-  const fileOps = { Read: true, Write: true, Edit: true,
-    mcp__acp__Read: true, mcp__acp__Write: true, mcp__acp__Edit: true,
-    Bash: true, Grep: true, Glob: true };
-  const isFileOp = fileOps[toolName];
   const cleanName = toolName.replace('mcp__acp__', '');
 
   // Pick icon based on tool type
@@ -624,14 +634,25 @@ function addToolMsg(toolName, params) {
     infoHtml += '<div class="tool-path">' + escHtml(shortPath(filePath)) + '</div>';
   }
 
+  // Pre-populate tool body with input details for Edit/Write
+  let bodyHtml = '';
+  if (params && cleanName === 'Edit' && params.old_string) {
+    bodyHtml = renderDiff(params.old_string, params.new_string || '');
+  } else if (params && cleanName === 'Write' && params.content) {
+    const preview = params.content.length > 2000
+      ? params.content.slice(0, 2000) + '\n... (truncated)'
+      : params.content;
+    bodyHtml = escHtml(preview);
+  }
+
   d.innerHTML =
     '<div class="tool-header">' +
       '<span class="tool-icon">' + icon + '</span>' +
       '<div class="tool-info">' + infoHtml + '</div>' +
       '<span class="tool-expand">&#9656;</span>' +
     '</div>' +
-    '<div class="tool-body"></div>' +
-    '<div class="tool-hint">tap to expand</div>';
+    '<div class="tool-body">' + bodyHtml + '</div>' +
+    '<div class="tool-hint">' + (bodyHtml ? 'tap to view details' : 'tap to expand') + '</div>';
   d.onclick = () => d.classList.toggle('expanded');
   messagesEl.appendChild(d);
   if (isAtBottom) scrollToBottom();
@@ -650,11 +671,17 @@ function updateToolStatus(toolEl, status, content) {
       iconEl.textContent = '\u2717';
     }
   }
+  const body = toolEl.querySelector('.tool-body');
+  const hint = toolEl.querySelector('.tool-hint');
   if (content) {
-    const body = toolEl.querySelector('.tool-body');
-    if (body) body.textContent = content;
-    const hint = toolEl.querySelector('.tool-hint');
-    if (hint) hint.textContent = 'tap to view content';
+    // Only replace body if it was empty (preserve pre-populated diffs)
+    if (body && !body.innerHTML.trim()) {
+      body.textContent = content;
+    }
+    if (hint) hint.textContent = 'tap to view details';
+  } else if (body && body.innerHTML.trim()) {
+    // Already has content from input params (diff/write preview)
+    if (hint) hint.textContent = 'tap to view details';
   }
 }
 
@@ -781,6 +808,8 @@ function scheduleReconnect() {
     messagesEl.innerHTML = '';
     currentAgentMsg = null;
     sessionId = null;
+    allReplayTurns = [];
+    renderedTurnStart = 0;
     if (currentSockPid) {
       connect(String(currentSockPid));
     } else {
@@ -803,6 +832,134 @@ function toolOutputText(update) {
   }
   if (typeof update.content === 'string') return update.content;
   return '';
+}
+
+function renderTurnBatch(turns, prepend) {
+  const fragment = document.createDocumentFragment();
+  let lastToolEl = null;
+  for (const t of turns) {
+    switch (t.type) {
+      case 'user': {
+        const d = document.createElement('div');
+        d.className = 'msg user';
+        d.id = 'msg-' + (++msgIdCounter);
+        const time = formatTime(new Date());
+        d.innerHTML =
+          '<span class="role">You</span>' +
+          '<div class="text">' + escHtml(t.text) + '</div>' +
+          '<div class="meta"><span class="time">' + time + '</span>' +
+          '<span class="delivery">&#10003;</span></div>';
+        fragment.appendChild(d);
+        break;
+      }
+      case 'agent': {
+        const d = document.createElement('div');
+        d.className = 'msg agent';
+        d.id = 'msg-' + (++msgIdCounter);
+        d.innerHTML =
+          '<span class="role">Agent</span>' +
+          '<div class="md">' + renderMarkdown(t.text) + '</div>';
+        d._text = t.text;
+        fragment.appendChild(d);
+        break;
+      }
+      case 'tool':
+        lastToolEl = addToolMsgTo(fragment, t.toolName, t.toolParams);
+        break;
+      case 'tool_update':
+        if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
+        break;
+    }
+  }
+  if (prepend) {
+    messagesEl.insertBefore(fragment, messagesEl.firstChild);
+  } else {
+    messagesEl.appendChild(fragment);
+  }
+}
+
+// Like addToolMsg but appends to a given parent (DocumentFragment)
+function addToolMsgTo(parent, toolName, params) {
+  const d = document.createElement('div');
+  d.className = 'msg tool';
+  d.id = 'msg-' + (++msgIdCounter);
+
+  const cleanName = toolName.replace('mcp__acp__', '');
+  let icon = '\u2699';
+  if (cleanName === 'Read') icon = '\uD83D\uDCD6';
+  else if (cleanName === 'Write') icon = '\uD83D\uDCDD';
+  else if (cleanName === 'Edit') icon = '\u270F\uFE0F';
+  else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
+  else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
+
+  let filePath = '';
+  if (params) {
+    filePath = params.file_path || params.path || params.command || '';
+  }
+
+  let infoHtml = '<div class="tool-name completed">' + escHtml(cleanName) + '</div>';
+  if (filePath) {
+    infoHtml += '<div class="tool-path">' + escHtml(shortPath(filePath)) + '</div>';
+  }
+
+  let bodyHtml = '';
+  if (params && cleanName === 'Edit' && params.old_string) {
+    bodyHtml = renderDiff(params.old_string, params.new_string || '');
+  } else if (params && cleanName === 'Write' && params.content) {
+    const preview = params.content.length > 2000
+      ? params.content.slice(0, 2000) + '\n... (truncated)'
+      : params.content;
+    bodyHtml = escHtml(preview);
+  }
+
+  d.innerHTML =
+    '<div class="tool-header">' +
+      '<span class="tool-icon">\u2713</span>' +
+      '<div class="tool-info">' + infoHtml + '</div>' +
+      '<span class="tool-expand">&#9656;</span>' +
+    '</div>' +
+    '<div class="tool-body">' + bodyHtml + '</div>' +
+    '<div class="tool-hint">' + (bodyHtml ? 'tap to view details' : 'tap to expand') + '</div>';
+  d.onclick = () => d.classList.toggle('expanded');
+  parent.appendChild(d);
+  return d;
+}
+
+function showLoadMoreHint() {
+  let hint = document.getElementById('load-more-hint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'load-more-hint';
+    hint.style.cssText = 'text-align:center;padding:12px;color:#007AFF;font-size:13px;cursor:pointer';
+    hint.textContent = 'Load earlier messages';
+    hint.onclick = loadMoreHistory;
+  }
+  messagesEl.insertBefore(hint, messagesEl.firstChild);
+}
+
+function loadMoreHistory() {
+  if (renderedTurnStart <= 0) return;
+  const LOAD_CHUNK = 20;
+  const newStart = Math.max(0, renderedTurnStart - LOAD_CHUNK);
+  const batch = allReplayTurns.slice(newStart, renderedTurnStart);
+  renderedTurnStart = newStart;
+
+  // Remember scroll position to maintain view
+  const prevHeight = messagesEl.scrollHeight;
+
+  // Remove existing hint
+  const hint = document.getElementById('load-more-hint');
+  if (hint) hint.remove();
+
+  renderTurnBatch(batch, true);
+
+  // Re-add hint if there's more
+  if (renderedTurnStart > 0) {
+    showLoadMoreHint();
+  }
+
+  // Restore scroll position
+  messagesEl.scrollTop += messagesEl.scrollHeight - prevHeight;
 }
 
 // Process all buffered replay messages at once, skipping intermediate renders.
@@ -896,29 +1053,17 @@ function flushReplay() {
     turns.push({type: 'agent', text: pendingText});
   }
 
-  // Only render the last few turns for context
-  const MAX_REPLAY_TURNS = 20;
-  const renderTurns = turns.slice(-MAX_REPLAY_TURNS);
+  // Store all turns; render only the last chunk
+  allReplayTurns = turns;
+  const INITIAL_TURNS = 20;
+  renderedTurnStart = Math.max(0, turns.length - INITIAL_TURNS);
+  const renderTurns = turns.slice(renderedTurnStart);
 
-  let lastToolEl = null;
-  for (const t of renderTurns) {
-    switch (t.type) {
-      case 'user':
-        addUserMsg(t.text, 'sent');
-        break;
-      case 'agent':
-        currentAgentMsg = addAgentMsg('');
-        currentAgentMsg._text = t.text;
-        updateAgentMsg(currentAgentMsg, t.text);
-        currentAgentMsg = null;
-        break;
-      case 'tool':
-        lastToolEl = addToolMsg(t.toolName, t.toolParams);
-        break;
-      case 'tool_update':
-        if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
-        break;
-    }
+  renderTurnBatch(renderTurns, false);
+
+  // Show "load more" hint if there's older history
+  if (renderedTurnStart > 0) {
+    showLoadMoreHint();
   }
 
   scrollToBottom();
@@ -1346,6 +1491,8 @@ function selectSession(session) {
   sessionId = null;
   projectCwd = session.cwd || null;
   availableModes = [];
+  allReplayTurns = [];
+  renderedTurnStart = 0;
   sendBtn.disabled = true;
   setProcessing(false);
 
