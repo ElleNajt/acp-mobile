@@ -571,7 +571,7 @@ function addUserMsg(text, status) {
   d.className = 'msg user';
   d.id = 'msg-' + (++msgIdCounter);
   const time = formatTime(new Date());
-  const deliveryIcon = status === 'sending' ? '&#9675;' : '&#10003;';
+  const deliveryIcon = status === 'queued' ? '&#9201;' : status === 'sending' ? '&#9675;' : '&#10003;';
   d.innerHTML =
     '<span class="role">You</span>' +
     '<div class="text">' + escHtml(text) + '</div>' +
@@ -869,6 +869,15 @@ function renderTurnBatch(turns, prepend) {
       case 'tool_update':
         if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
         break;
+      case 'error': {
+        const d = document.createElement('div');
+        d.className = 'msg error';
+        d.innerHTML =
+          '<span class="error-icon">\u26A0\uFE0F</span>' +
+          '<span class="text">' + escHtml(t.text) + '</span>';
+        fragment.appendChild(d);
+        break;
+      }
     }
   }
   if (prepend) {
@@ -973,10 +982,22 @@ function flushReplay() {
   // and collect notification sequences into assembled turns.
   const turns = []; // {type, text, toolName, toolParams, toolStatus, toolContent}
   let pendingText = '';
+  let replayEnded = false; // true if we saw a stopReason or available_commands_update
 
   for (const msg of msgs) {
     // Responses: handle silently for state (sessionId, modes, etc.)
     if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
+      if (msg.error) {
+        let errText = msg.error.message || 'Unknown error';
+        if (msg.error.data && msg.error.data.details) {
+          errText += ': ' + msg.error.data.details;
+        }
+        if (msg.error.code) {
+          errText += ' [' + msg.error.code + ']';
+        }
+        turns.push({type: 'error', text: errText});
+        continue;
+      }
       if (msg.result && msg.result.agentInfo) {
         const info = msg.result.agentInfo;
         headerTitle.textContent = info.title || info.name || 'ACP';
@@ -995,6 +1016,7 @@ function flushReplay() {
         }
       }
       if (msg.result && msg.result.stopReason) {
+        replayEnded = true;
         // Flush pending agent text as a turn
         if (pendingText) {
           turns.push({type: 'agent', text: pendingText});
@@ -1043,6 +1065,7 @@ function flushReplay() {
         if (text) turns.push({type: 'user', text});
         break;
       case 'available_commands_update':
+        replayEnded = true;
         if (sessionId) sendBtn.disabled = false;
         setProcessing(false);
         break;
@@ -1051,6 +1074,12 @@ function flushReplay() {
   // Flush any remaining agent text
   if (pendingText) {
     turns.push({type: 'agent', text: pendingText});
+  }
+
+  // Detect if agent is still processing at end of replay
+  // (no stopReason response and no available_commands_update seen at the end)
+  if (!replayEnded) {
+    setProcessing(true);
   }
 
   // Store all turns; render only the last chunk
@@ -1073,7 +1102,14 @@ function handleMessage(msg) {
   // Response
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
     if (msg.error) {
-      addErrorMsg(msg.error.message || JSON.stringify(msg.error));
+      let errText = msg.error.message || 'Unknown error';
+      if (msg.error.data && msg.error.data.details) {
+        errText += ': ' + msg.error.data.details;
+      }
+      if (msg.error.code) {
+        errText += ' [' + msg.error.code + ']';
+      }
+      addErrorMsg(errText);
       setProcessing(false);
       return;
     }
@@ -1105,6 +1141,7 @@ function handleMessage(msg) {
       setProcessing(false);
       // Mark last sent user message as delivered
       if (lastSentMsg) { markSent(lastSentMsg); lastSentMsg = null; }
+      flushMessageQueue();
     }
     return;
   }
@@ -1130,6 +1167,7 @@ function handleMessage(msg) {
 
     switch (kind) {
       case 'agent_message_chunk':
+        setProcessing(true);
         if (!currentAgentMsg) {
           currentAgentMsg = addAgentMsg('');
         }
@@ -1148,6 +1186,7 @@ function handleMessage(msg) {
 
       case 'tool_call':
         currentAgentMsg = null;
+        setProcessing(true);
         messagesEl._lastTool = addToolMsg(
           toolName(update),
           update.rawInput || null
@@ -1168,6 +1207,7 @@ function handleMessage(msg) {
       case 'available_commands_update':
         if (sessionId) sendBtn.disabled = false;
         setProcessing(false);
+        flushMessageQueue();
         break;
     }
     return;
@@ -1182,15 +1222,28 @@ function handleMessage(msg) {
 // --- User interaction ---
 
 let lastSentMsg = null;
+let messageQueue = [];
 
 function sendPrompt() {
   const text = promptEl.value.trim();
   if (!text || !sessionId) return;
 
-  currentAgentMsg = null;
-  lastSentMsg = addUserMsg(text, 'sending');
   promptEl.value = '';
   promptEl.style.height = 'auto';
+
+  if (processing) {
+    // Queue message for when agent finishes
+    messageQueue.push(text);
+    addUserMsg(text, 'queued');
+    return;
+  }
+
+  sendPromptText(text);
+}
+
+function sendPromptText(text) {
+  currentAgentMsg = null;
+  lastSentMsg = addUserMsg(text, 'sending');
   setProcessing(true);
 
   ws.send(JSON.stringify({
@@ -1201,6 +1254,21 @@ function sendPrompt() {
   }));
 }
 
+function flushMessageQueue() {
+  if (messageQueue.length > 0) {
+    const text = messageQueue.shift();
+    // Message was already displayed when queued, just send it
+    currentAgentMsg = null;
+    setProcessing(true);
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: nextId++,
+      method: 'session/prompt',
+      params: { sessionId, prompt: [{ type: 'text', text }] }
+    }));
+  }
+}
+
 function cancelPrompt() {
   if (!sessionId) return;
   ws.send(JSON.stringify({
@@ -1208,6 +1276,7 @@ function cancelPrompt() {
     method: 'session/cancel',
     params: { sessionId }
   }));
+  messageQueue = [];
   setProcessing(false);
   addSystemMsg('Cancelled');
 }

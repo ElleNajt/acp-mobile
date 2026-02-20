@@ -1,0 +1,30 @@
+* DONE Edits and writes don't show properly in chat view
+Tool calls for file edits/writes aren't rendering correctly in the message stream.
+
+* DONE Scroll up to load more conversation history
+Replay currently trims to recent turns. Need to load older history on scroll-up.
+Data is already in acp-multiplex, just not being sent/requested.
+
+* DONE Fix Stop button not visible during tool execution
+setProcessing(true) is only called from sendPrompt(). If you connect
+mid-conversation while the agent is running tools, Stop never appears.
+Fixed: detect active processing from replay/live tool_call and agent_message_chunk events.
+
+* TODO Kill buffers via agent-shell
+Add HTTP endpoint that calls emacsclient to invoke
+meta-agent-shell-close-session with the buffer name.
+Part of configurable control buttons.
+
+* TODO Start new buffers via agent-shell
+Add HTTP endpoint that calls agent-shell-spawn.
+Part of configurable control buttons.
+
+* DONE Message queuing
+Queue messages typed while agent is still processing.
+Send them automatically when the agent finishes (available_commands_update/stopReason).
+Shows timer icon for queued messages. Cancel clears queue.
+
+* DONE More detail in internal errors
+Errors now show data.details and error code from JSON-RPC responses.
+Server sends structured errors when socket not found or connection fails.
+Replay errors are also surfaced in the chat.

@@ -126,6 +126,7 @@ func main() {
 			sockPath := findSocket(pid)
 			if sockPath == "" {
 				log.Printf("ws: no socket for pid %s", pid)
+				websocket.Message.Send(ws, `{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Session not found","data":{"details":"No socket for pid `+pid+`"}}}`)
 				ws.Close()
 				return
 			}
@@ -494,6 +495,8 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		log.Printf("ws: connect to %s: %v", sockPath, err)
+		errMsg := fmt.Sprintf(`{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Connection failed","data":{"details":"%s"}}}`, strings.ReplaceAll(err.Error(), `"`, `\"`))
+		websocket.Message.Send(ws, errMsg)
 		ws.Close()
 		return
 	}
