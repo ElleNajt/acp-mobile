@@ -37,27 +37,32 @@ body {
 #nav-empty {
   padding: 40px 16px; text-align: center; color: #666; font-size: 15px;
 }
+.project-group {
+  margin-bottom: 4px;
+}
+.project-header {
+  padding: 10px 16px 4px; font-size: 13px; font-weight: 700;
+  color: #888; text-transform: uppercase; letter-spacing: 0.5px;
+  background: #121212; position: sticky; top: 0; z-index: 1;
+}
 .session-card {
-  padding: 14px 16px; border-bottom: 1px solid #1e1e1e;
+  padding: 12px 16px; border-bottom: 1px solid #1e1e1e;
   cursor: pointer; display: flex; align-items: flex-start; gap: 12px;
 }
 .session-card:active { background: #1e1e1e; }
 .session-card .sc-dot {
   width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-  margin-top: 5px; background: #3fb950;
+  margin-top: 4px; background: #3fb950;
 }
 .session-card .sc-info { flex: 1; min-width: 0; }
-.session-card .sc-title {
-  font-size: 16px; font-weight: 600; color: #fff;
+.session-card .sc-name {
+  font-size: 15px; font-weight: 600; color: #fff;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .session-card .sc-path {
-  font-size: 12px; color: #888; margin-top: 2px;
+  font-size: 12px; color: #666; margin-top: 2px;
   font-family: "SF Mono", Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.session-card .sc-id {
-  font-size: 11px; color: #555; margin-top: 2px;
 }
 
 /* Chat view (hidden initially in discover mode) */
@@ -1073,21 +1078,47 @@ async function loadSessions() {
 
 function renderSessions(sessions) {
   navListEl.innerHTML = '';
+
+  // Group by project
+  const groups = new Map();
   for (const s of sessions) {
-    const d = document.createElement('div');
-    d.className = 'session-card';
-    const title = s.title || 'Session';
-    const path = s.cwd ? shortPath(s.cwd) : '';
-    const idShort = s.sessionId ? s.sessionId.substring(0, 8) : 'pid:' + s.pid;
-    d.innerHTML =
-      '<div class="sc-dot"></div>' +
-      '<div class="sc-info">' +
-        '<div class="sc-title">' + escHtml(title) + '</div>' +
-        (path ? '<div class="sc-path">' + escHtml(path) + '</div>' : '') +
-        '<div class="sc-id">' + escHtml(idShort) + '</div>' +
-      '</div>';
-    d.onclick = () => selectSession(s);
-    navListEl.appendChild(d);
+    const proj = s.project || 'unknown';
+    if (!groups.has(proj)) groups.set(proj, []);
+    groups.get(proj).push(s);
+  }
+
+  // Sort groups alphabetically
+  const sortedKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+  for (const proj of sortedKeys) {
+    const group = groups.get(proj);
+    const groupEl = document.createElement('div');
+    groupEl.className = 'project-group';
+
+    const header = document.createElement('div');
+    header.className = 'project-header';
+    header.textContent = proj;
+    groupEl.appendChild(header);
+
+    // Assign buffer-style names with <N> suffix for duplicates
+    for (let i = 0; i < group.length; i++) {
+      const s = group[i];
+      const suffix = group.length > 1 ? (i === 0 ? '' : '<' + (i + 1) + '>') : '';
+      const bufferName = 'Agent @ ' + proj + suffix;
+
+      const d = document.createElement('div');
+      d.className = 'session-card';
+      d.innerHTML =
+        '<div class="sc-dot"></div>' +
+        '<div class="sc-info">' +
+          '<div class="sc-name">' + escHtml(bufferName) + '</div>' +
+          (s.cwd ? '<div class="sc-path">' + escHtml(shortPath(s.cwd)) + '</div>' : '') +
+        '</div>';
+      d.onclick = () => selectSession(s);
+      groupEl.appendChild(d);
+    }
+
+    navListEl.appendChild(groupEl);
   }
 }
 
@@ -1110,7 +1141,7 @@ function showChat() {
   navigatorEl.classList.add('hidden');
   chatViewEl.classList.add('visible');
   if (discoverMode) {
-    backBtn.style.display = '';
+    backBtn.style.display = 'block';
   }
 }
 
