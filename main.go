@@ -345,6 +345,9 @@ func processCwd(pid int) string {
 
 // --- WebSocket bridge ---
 
+// bridgeWebSocket connects to the proxy socket, reads the replay,
+// sends only the essential messages (responses + tail of notifications)
+// to the browser, then bridges live traffic.
 func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -354,6 +357,75 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 	}
 	defer conn.Close()
 
+	// Phase 1: Read the replay burst.
+	// Set a short deadline — replay arrives immediately, then the socket blocks.
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+
+	var responses [][]byte     // keep all responses (initialize, session/new, prompt results)
+	var notifications [][]byte // ring buffer of last N notifications
+	const tailSize = 40
+
+	buf := make([]byte, 0, 64*1024)
+	tmp := make([]byte, 64*1024)
+	replayDone := false
+
+	for !replayDone {
+		n, err := conn.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			// Extract complete lines
+			for {
+				nl := bytes.IndexByte(buf, '\n')
+				if nl < 0 {
+					break
+				}
+				line := make([]byte, nl)
+				copy(line, buf[:nl])
+				buf = buf[nl+1:]
+
+				if len(line) == 0 {
+					continue
+				}
+
+				// Classify: response vs notification
+				// Responses have "id" + ("result" or "error")
+				// Notifications have "method"
+				if bytes.Contains(line, []byte(`"result"`)) || bytes.Contains(line, []byte(`"error"`)) {
+					responses = append(responses, line)
+				} else {
+					notifications = append(notifications, line)
+				}
+			}
+		}
+		if err != nil {
+			// Timeout = replay done; other errors = real error
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				replayDone = true
+			} else {
+				log.Printf("ws: replay read: %v", err)
+				ws.Close()
+				return
+			}
+		}
+	}
+
+	// Clear deadline for live traffic
+	conn.SetDeadline(time.Time{})
+
+	// Phase 2: Send trimmed replay to browser.
+	// All responses (usually 2-3), plus last N notifications.
+	for _, line := range responses {
+		websocket.Message.Send(ws, string(line))
+	}
+	tail := notifications
+	if len(tail) > tailSize {
+		tail = tail[len(tail)-tailSize:]
+	}
+	for _, line := range tail {
+		websocket.Message.Send(ws, string(line))
+	}
+
+	// Phase 3: Bridge live traffic.
 	var once sync.Once
 	closeAll := func() {
 		ws.Close()
@@ -379,8 +451,19 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 	// Unix socket -> WebSocket (line-buffered)
 	func() {
 		defer once.Do(closeAll)
-		buf := make([]byte, 0, 4096)
-		tmp := make([]byte, 4096)
+		// Send any leftover bytes from the replay read
+		for {
+			nl := bytes.IndexByte(buf, '\n')
+			if nl < 0 {
+				break
+			}
+			line := buf[:nl]
+			if len(line) > 0 {
+				websocket.Message.Send(ws, string(line))
+			}
+			buf = buf[nl+1:]
+		}
+
 		for {
 			n, err := conn.Read(tmp)
 			if err != nil {
@@ -390,26 +473,16 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 				return
 			}
 			buf = append(buf, tmp[:n]...)
-			if len(buf) > 1024*1024 {
-				log.Printf("ws: buffer exceeded 1MB, disconnecting")
-				return
-			}
 			for {
-				nlIdx := -1
-				for i, b := range buf {
-					if b == '\n' {
-						nlIdx = i
-						break
-					}
-				}
-				if nlIdx < 0 {
+				nl := bytes.IndexByte(buf, '\n')
+				if nl < 0 {
 					break
 				}
-				line := buf[:nlIdx]
+				line := buf[:nl]
 				if len(line) > 0 {
 					websocket.Message.Send(ws, string(line))
 				}
-				buf = buf[nlIdx+1:]
+				buf = buf[nl+1:]
 			}
 		}
 	}()
