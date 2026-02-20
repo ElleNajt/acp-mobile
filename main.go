@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -256,64 +256,74 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 		return info
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
 
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	// Read raw bytes instead of scanning lines — much faster for large replays.
+	// We only need the first ~2 response messages (initialize + session/new).
+	buf := make([]byte, 64*1024)
+	var data []byte
+	gotSessionID := false
+	gotTitle := false
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			data = append(data, buf[:n]...)
+			// Parse complete lines we have so far
+			for {
+				nl := bytes.IndexByte(data, '\n')
+				if nl < 0 {
+					break
+				}
+				line := data[:nl]
+				data = data[nl+1:]
 
-		var msg struct {
-			Result json.RawMessage `json:"result"`
-			Method string          `json:"method"`
-			Params json.RawMessage `json:"params"`
-		}
-		if err := json.Unmarshal(line, &msg); err != nil {
-			continue
-		}
+				if len(line) == 0 {
+					continue
+				}
 
-		if msg.Result != nil {
-			var res struct {
-				AgentInfo *struct {
-					Title string `json:"title"`
-					Name  string `json:"name"`
-				} `json:"agentInfo"`
-				SessionID string `json:"sessionId"`
-				Cwd       string `json:"cwd"`
-			}
-			if err := json.Unmarshal(msg.Result, &res); err == nil {
+				var msg struct {
+					Result json.RawMessage `json:"result"`
+				}
+				if json.Unmarshal(line, &msg) != nil || msg.Result == nil {
+					continue
+				}
+
+				var res struct {
+					AgentInfo *struct {
+						Title string `json:"title"`
+						Name  string `json:"name"`
+					} `json:"agentInfo"`
+					SessionID string `json:"sessionId"`
+					Cwd       string `json:"cwd"`
+				}
+				if json.Unmarshal(msg.Result, &res) != nil {
+					continue
+				}
+
 				if res.AgentInfo != nil {
 					info.Title = res.AgentInfo.Title
 					if info.Title == "" {
 						info.Title = res.AgentInfo.Name
 					}
+					gotTitle = true
 				}
 				if res.SessionID != "" {
 					info.SessionID = res.SessionID
+					gotSessionID = true
 				}
 				if res.Cwd != "" {
 					info.Cwd = res.Cwd
 					info.Project = filepath.Base(info.Cwd)
 				}
-			}
-		}
 
-		if msg.Method == "session/update" && msg.Params != nil {
-			var params struct {
-				Update struct {
-					Kind  string `json:"sessionUpdate"`
-					Title string `json:"title"`
-				} `json:"update"`
-			}
-			if err := json.Unmarshal(msg.Params, &params); err == nil {
-				if params.Update.Kind == "title_update" && params.Update.Title != "" {
-					info.Title = params.Update.Title
+				if gotSessionID && gotTitle {
+					return info
 				}
 			}
+		}
+		if err != nil {
+			break
 		}
 	}
 
