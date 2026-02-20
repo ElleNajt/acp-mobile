@@ -1242,7 +1242,8 @@ function renderSessions(sessions) {
     for (let i = 0; i < group.length; i++) {
       const s = group[i];
       const suffix = group.length > 1 ? (i === 0 ? '' : '<' + (i + 1) + '>') : '';
-      const bufferName = 'Agent @ ' + proj + suffix;
+      const agentName = (s.title || 'Claude Code') + ' Agent';
+      const bufferName = agentName + ' @ ' + proj + suffix;
 
       const d = document.createElement('div');
       d.className = 'session-card';
