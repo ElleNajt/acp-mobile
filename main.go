@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,9 @@ import (
 
 	"golang.org/x/net/websocket"
 )
+
+//go:embed index.html
+var indexHTML []byte
 
 type tailscaleInfo struct {
 	Hostname string
@@ -102,7 +106,8 @@ func main() {
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
-		http.ServeFile(w, r, "index.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
 	})
 
 	mux.Handle("/ws", &websocket.Server{
@@ -625,11 +630,19 @@ func allowedRoots() []string {
 }
 
 // isUnderRoots checks if absPath is under one of the allowed roots.
+// Resolves symlinks to prevent traversal via symlinked directories.
 func isUnderRoots(absPath string, roots []string) bool {
-	// Ensure absPath has a trailing separator for prefix matching
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return false
+	}
 	for _, root := range roots {
-		root = filepath.Clean(root) + string(filepath.Separator)
-		if strings.HasPrefix(absPath+string(filepath.Separator), root) {
+		rootResolved, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		rootResolved = filepath.Clean(rootResolved) + string(filepath.Separator)
+		if strings.HasPrefix(resolved+string(filepath.Separator), rootResolved) {
 			return true
 		}
 	}
