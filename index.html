@@ -42,13 +42,7 @@ body {
 #header .header-actions {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
-#header .stop-btn {
-  background: #FF9800; color: #fff; border: none; border-radius: 6px;
-  padding: 6px 12px; font-size: 12px; font-weight: 600;
-  cursor: pointer; display: none;
-}
-#header .stop-btn.visible { display: inline-block; }
-#header .stop-btn:active { background: #e68a00; }
+
 #header .files-btn {
   background: transparent; border: 1px solid #555; border-radius: 6px;
   color: #ccc; padding: 6px 10px; font-size: 12px; cursor: pointer;
@@ -287,6 +281,13 @@ body {
 }
 #send:active { background: #0066d6; }
 #send:disabled { background: #333; color: #666; }
+#stop-btn {
+  background: #FF9800; border: none; border-radius: 20px;
+  color: white; padding: 10px 20px; font-size: 16px; font-weight: 600;
+  cursor: pointer; flex-shrink: 0; min-width: 60px;
+  display: none;
+}
+#stop-btn:active { background: #e68a00; }
 
 /* Markdown in agent messages */
 .msg.agent .md pre {
@@ -336,7 +337,6 @@ body {
   </div>
   <div class="header-actions">
     <button class="files-btn" id="files-btn" onclick="openFileBrowser()">Files</button>
-    <button class="stop-btn" id="stop-btn" onclick="cancelPrompt()">Stop</button>
   </div>
 </div>
 <div id="file-browser">
@@ -361,6 +361,7 @@ body {
 <div id="input-area">
   <textarea id="prompt" rows="1" placeholder="Message the agent..." enterkeyhint="send"></textarea>
   <button id="send" disabled onclick="sendPrompt()">Send</button>
+  <button id="stop-btn" onclick="cancelPrompt()">Stop</button>
 </div>
 
 <script>
@@ -601,7 +602,8 @@ messagesEl.addEventListener('scroll', () => {
 function setProcessing(v) {
   processing = v;
   thinkingEl.classList.toggle('visible', v);
-  stopBtn.classList.toggle('visible', v);
+  sendBtn.style.display = v ? 'none' : '';
+  stopBtn.style.display = v ? 'flex' : 'none';
 }
 
 function updateModeBtn() {
