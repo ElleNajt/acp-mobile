@@ -465,6 +465,9 @@ let currentSockPid = null;
 // Mode state
 let currentMode = 'default';
 let availableModes = [];
+let replayMode = false;
+let replayBuffer = [];
+let replayTimer = null;
 const MODE_LABELS = {
   default: 'Ask', acceptEdits: 'Edits', plan: 'Plan',
   dontAsk: "Don't Ask", bypassPermissions: 'YOLO'
@@ -711,6 +714,10 @@ function cycleMode() {
 // --- WebSocket & ACP protocol ---
 
 function connect(pid) {
+  replayMode = true;
+  replayBuffer = [];
+  clearTimeout(replayTimer);
+
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   let url = proto + '//' + location.host + '/ws';
   if (pid) url += '?sock=' + pid;
@@ -725,7 +732,14 @@ function connect(pid) {
   };
 
   ws.onmessage = (e) => {
-    handleMessage(JSON.parse(e.data));
+    const msg = JSON.parse(e.data);
+    if (replayMode) {
+      replayBuffer.push(msg);
+      clearTimeout(replayTimer);
+      replayTimer = setTimeout(flushReplay, 80);
+    } else {
+      handleMessage(msg);
+    }
   };
 
   ws.onclose = () => {
@@ -759,6 +773,119 @@ function scheduleReconnect() {
       connect();
     }
   }, delay);
+}
+
+// Process all buffered replay messages at once, skipping intermediate renders.
+// Assembles agent chunks into complete messages, renders once per message turn.
+function flushReplay() {
+  replayMode = false;
+  const msgs = replayBuffer;
+  replayBuffer = [];
+
+  // First pass: process responses (initialize, session/new, prompt results)
+  // and collect notification sequences into assembled turns.
+  const turns = []; // {type, text, toolName, toolParams, toolStatus, toolContent}
+  let pendingText = '';
+
+  for (const msg of msgs) {
+    // Responses: handle silently for state (sessionId, modes, etc.)
+    if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
+      if (msg.result && msg.result.agentInfo) {
+        const info = msg.result.agentInfo;
+        headerTitle.textContent = info.title || info.name || 'ACP';
+      }
+      if (msg.result && msg.result.sessionId) {
+        sessionId = msg.result.sessionId;
+        sendBtn.disabled = false;
+        if (msg.result.cwd) projectCwd = msg.result.cwd;
+        if (msg.result.modes) {
+          availableModes = msg.result.modes.availableModes || [];
+          currentMode = msg.result.modes.currentModeId || 'default';
+          if (availableModes.length > 0) {
+            modeBtn.style.display = '';
+            updateModeBtn();
+          }
+        }
+      }
+      if (msg.result && msg.result.stopReason) {
+        // Flush pending agent text as a turn
+        if (pendingText) {
+          turns.push({type: 'agent', text: pendingText});
+          pendingText = '';
+        }
+      }
+      continue;
+    }
+
+    // Notifications
+    if (msg.method !== 'session/update' || !msg.params) continue;
+    const update = msg.params.update;
+    if (!update) continue;
+    if (!sessionId && msg.params.sessionId) {
+      sessionId = msg.params.sessionId;
+      sendBtn.disabled = false;
+    }
+
+    const kind = update.sessionUpdate;
+    const text = (update.content && update.content.text) || update.text || '';
+
+    switch (kind) {
+      case 'agent_message_chunk':
+        pendingText += text;
+        break;
+      case 'tool_call':
+        // Flush pending agent text
+        if (pendingText) {
+          turns.push({type: 'agent', text: pendingText});
+          pendingText = '';
+        }
+        turns.push({type: 'tool', toolName: update.toolName || '?', toolParams: update.params || update.input || null});
+        break;
+      case 'tool_call_update':
+        turns.push({type: 'tool_update', toolStatus: update.status || 'completed',
+          toolContent: update.content ? (typeof update.content === 'string' ? update.content : JSON.stringify(update.content, null, 2)) : ''});
+        break;
+      case 'user_message_chunk':
+        if (pendingText) {
+          turns.push({type: 'agent', text: pendingText});
+          pendingText = '';
+        }
+        if (text) turns.push({type: 'user', text});
+        break;
+      case 'available_commands_update':
+        if (sessionId) sendBtn.disabled = false;
+        setProcessing(false);
+        break;
+    }
+  }
+  // Flush any remaining agent text
+  if (pendingText) {
+    turns.push({type: 'agent', text: pendingText});
+  }
+
+  // Second pass: render all turns at once
+  let lastToolEl = null;
+  for (const t of turns) {
+    switch (t.type) {
+      case 'user':
+        addUserMsg(t.text, 'sent');
+        break;
+      case 'agent':
+        currentAgentMsg = addAgentMsg('');
+        currentAgentMsg._text = t.text;
+        updateAgentMsg(currentAgentMsg, t.text);
+        currentAgentMsg = null;
+        break;
+      case 'tool':
+        lastToolEl = addToolMsg(t.toolName, t.toolParams);
+        break;
+      case 'tool_update':
+        if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
+        break;
+    }
+  }
+
+  scrollToBottom();
 }
 
 function handleMessage(msg) {
