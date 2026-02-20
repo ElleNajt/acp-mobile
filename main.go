@@ -33,6 +33,8 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 		http.ServeFile(w, r, "index.html")
 	})
 
