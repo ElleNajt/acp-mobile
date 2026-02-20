@@ -14,22 +14,41 @@ body {
   overflow: hidden;
 }
 
-/* Status bar */
-#status {
-  padding: 6px 16px; font-size: 12px; color: #888;
-  border-bottom: 1px solid #333; flex-shrink: 0;
-  display: flex; justify-content: space-between; align-items: center;
-  background: #1e1e1e;
+/* Header bar */
+#header {
+  display: flex; align-items: center; padding: 10px 12px;
+  background: #1e1e1e; border-bottom: 1px solid #333; flex-shrink: 0;
+  gap: 8px;
 }
-#status.connected { color: #3fb950; }
-#status.error { color: #f85149; }
-#status .cancel-btn {
+#header .header-info { flex: 1; min-width: 0; }
+#header .header-title {
+  color: #fff; font-size: 16px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#header .header-sub {
+  display: flex; align-items: center; gap: 8px; margin-top: 2px;
+}
+#header .header-status {
+  font-size: 12px; color: #888;
+}
+#header .header-status.connected { color: #3fb950; }
+#header .header-status.error { color: #f85149; }
+#header .mode-btn {
+  border: 1px solid #888; border-radius: 4px;
+  padding: 1px 6px; font-size: 10px; font-weight: 600;
+  color: #888; background: transparent; cursor: pointer;
+}
+#header .mode-btn:active { opacity: 0.7; }
+#header .header-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+#header .stop-btn {
   background: #FF9800; color: #fff; border: none; border-radius: 6px;
   padding: 6px 12px; font-size: 12px; font-weight: 600;
   cursor: pointer; display: none;
 }
-#status .cancel-btn.visible { display: inline-block; }
-#status .cancel-btn:active { background: #e68a00; }
+#header .stop-btn.visible { display: inline-block; }
+#header .stop-btn:active { background: #e68a00; }
 
 /* Messages area */
 #messages {
@@ -233,9 +252,17 @@ body {
 </style>
 </head>
 <body>
-<div id="status">
-  <span id="status-text">Connecting...</span>
-  <button class="cancel-btn" id="cancel-btn" onclick="cancelPrompt()">Stop</button>
+<div id="header">
+  <div class="header-info">
+    <div class="header-title" id="header-title">ACP</div>
+    <div class="header-sub">
+      <span class="header-status" id="status-text">Connecting...</span>
+      <button class="mode-btn" id="mode-btn" onclick="cycleMode()" style="display:none">Ask</button>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="stop-btn" id="stop-btn" onclick="cancelPrompt()">Stop</button>
+  </div>
 </div>
 <div id="messages"></div>
 <div id="thinking"><div class="spinner"></div><span class="label">Agent is thinking...</span></div>
@@ -248,10 +275,11 @@ body {
 <script>
 const messagesEl = document.getElementById('messages');
 const statusText = document.getElementById('status-text');
-const statusEl = document.getElementById('status');
+const headerTitle = document.getElementById('header-title');
+const modeBtn = document.getElementById('mode-btn');
 const promptEl = document.getElementById('prompt');
 const sendBtn = document.getElementById('send');
-const cancelBtn = document.getElementById('cancel-btn');
+const stopBtn = document.getElementById('stop-btn');
 const thinkingEl = document.getElementById('thinking');
 const scrollBtn = document.getElementById('scroll-btn');
 
@@ -262,6 +290,18 @@ let reconnectAttempts = 0;
 let reconnectTimer = null;
 let isAtBottom = true;
 let msgIdCounter = 0;
+
+// Mode state
+let currentMode = 'default';
+let availableModes = [];
+const MODE_LABELS = {
+  default: 'Ask', acceptEdits: 'Edits', plan: 'Plan',
+  dontAsk: "Don't Ask", bypassPermissions: 'YOLO'
+};
+const MODE_COLORS = {
+  default: '#888', acceptEdits: '#4CAF50', plan: '#FF9800',
+  dontAsk: '#2196F3', bypassPermissions: '#F44336'
+};
 
 // --- Markdown renderer (basic, no dependencies) ---
 
@@ -469,7 +509,31 @@ messagesEl.addEventListener('scroll', () => {
 function setProcessing(v) {
   processing = v;
   thinkingEl.classList.toggle('visible', v);
-  cancelBtn.classList.toggle('visible', v);
+  stopBtn.classList.toggle('visible', v);
+}
+
+function updateModeBtn() {
+  const label = MODE_LABELS[currentMode] || currentMode;
+  const color = MODE_COLORS[currentMode] || '#888';
+  modeBtn.textContent = label;
+  modeBtn.style.color = color;
+  modeBtn.style.borderColor = color;
+}
+
+function cycleMode() {
+  if (!sessionId || availableModes.length === 0) return;
+  const ids = availableModes.map(m => m.id);
+  const idx = ids.indexOf(currentMode);
+  const nextMode = ids[(idx + 1) % ids.length];
+  // Optimistic update
+  currentMode = nextMode;
+  updateModeBtn();
+  // Send to agent
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0', id: nextId++,
+    method: 'session/set_mode',
+    params: { sessionId, modeId: nextMode }
+  }));
 }
 
 // --- WebSocket & ACP protocol ---
@@ -480,7 +544,7 @@ function connect() {
 
   ws.onopen = () => {
     statusText.textContent = 'Connected';
-    statusEl.className = 'connected';
+    statusText.className = 'header-status connected';
     reconnectAttempts = 0;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   };
@@ -491,7 +555,7 @@ function connect() {
 
   ws.onclose = () => {
     statusText.textContent = 'Disconnected';
-    statusEl.className = 'error';
+    statusText.className = 'header-status error';
     sendBtn.disabled = true;
     setProcessing(false);
     scheduleReconnect();
@@ -499,7 +563,7 @@ function connect() {
 
   ws.onerror = () => {
     statusText.textContent = 'Connection error';
-    statusEl.className = 'error';
+    statusText.className = 'header-status error';
   };
 }
 
@@ -527,12 +591,21 @@ function handleMessage(msg) {
 
     if (msg.result && msg.result.agentInfo) {
       const info = msg.result.agentInfo;
-      addSystemMsg((info.title || info.name || 'Agent') + ' ' + (info.version || ''));
+      headerTitle.textContent = info.title || info.name || 'ACP';
     }
 
     if (msg.result && msg.result.sessionId) {
       sessionId = msg.result.sessionId;
       sendBtn.disabled = false;
+      // Extract modes from session/new response
+      if (msg.result.modes) {
+        availableModes = msg.result.modes.availableModes || [];
+        currentMode = msg.result.modes.currentModeId || 'default';
+        if (availableModes.length > 0) {
+          modeBtn.style.display = '';
+          updateModeBtn();
+        }
+      }
     }
 
     if (msg.result && msg.result.stopReason) {
