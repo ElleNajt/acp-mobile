@@ -863,9 +863,12 @@ function flushReplay() {
     turns.push({type: 'agent', text: pendingText});
   }
 
-  // Second pass: render all turns at once
+  // Only render the last few turns for context
+  const MAX_REPLAY_TURNS = 20;
+  const renderTurns = turns.slice(-MAX_REPLAY_TURNS);
+
   let lastToolEl = null;
-  for (const t of turns) {
+  for (const t of renderTurns) {
     switch (t.type) {
       case 'user':
         addUserMsg(t.text, 'sent');
