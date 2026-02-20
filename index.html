@@ -775,6 +775,22 @@ function scheduleReconnect() {
   }, delay);
 }
 
+function toolName(update) {
+  return update.title || (update._meta && update._meta.claudeCode && update._meta.claudeCode.toolName) || '?';
+}
+
+function toolOutputText(update) {
+  if (update.rawOutput) return update.rawOutput;
+  if (Array.isArray(update.content)) {
+    for (const c of update.content) {
+      const inner = c.content || c;
+      if (inner.text) return inner.text;
+    }
+  }
+  if (typeof update.content === 'string') return update.content;
+  return '';
+}
+
 // Process all buffered replay messages at once, skipping intermediate renders.
 // Assembles agent chunks into complete messages, renders once per message turn.
 function flushReplay() {
@@ -839,11 +855,10 @@ function flushReplay() {
           turns.push({type: 'agent', text: pendingText});
           pendingText = '';
         }
-        turns.push({type: 'tool', toolName: update.toolName || '?', toolParams: update.params || update.input || null});
+        turns.push({type: 'tool', toolName: toolName(update), toolParams: update.rawInput || null});
         break;
       case 'tool_call_update':
-        turns.push({type: 'tool_update', toolStatus: update.status || 'completed',
-          toolContent: update.content ? (typeof update.content === 'string' ? update.content : JSON.stringify(update.content, null, 2)) : ''});
+        turns.push({type: 'tool_update', toolStatus: update.status || 'completed', toolContent: toolOutputText(update)});
         break;
       case 'user_message_chunk':
         if (pendingText) {
@@ -965,21 +980,14 @@ function handleMessage(msg) {
       case 'tool_call':
         currentAgentMsg = null;
         messagesEl._lastTool = addToolMsg(
-          update.toolName || '?',
-          update.params || update.input || null
+          toolName(update),
+          update.rawInput || null
         );
         break;
 
       case 'tool_call_update':
         if (messagesEl._lastTool) {
-          const st = update.status || 'completed';
-          let content = '';
-          if (update.content) {
-            content = typeof update.content === 'string'
-              ? update.content
-              : JSON.stringify(update.content, null, 2);
-          }
-          updateToolStatus(messagesEl._lastTool, st, content);
+          updateToolStatus(messagesEl._lastTool, update.status || 'completed', toolOutputText(update));
         }
         break;
 
