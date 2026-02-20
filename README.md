@@ -8,22 +8,18 @@ Discovers all live acp-multiplex sockets on the machine, shows them grouped by p
 
 ```bash
 go build -o acp-mobile .
-./acp-mobile
+./acp-mobile [port]  # default 8090
 ```
 
-The server joins your tailnet as `acp-mobile` using [tsnet](https://tailscale.com/kb/1244/tsnet) and listens on HTTPS with automatic TLS certificates. On first run it will print a Tailscale auth URL — visit it to authorize the node.
+The server binds to `127.0.0.1` only. To access it from your phone, register it with [agent-to-go](https://github.com/ElleNajt/agent-to-go):
 
-Once authorized, the UI is available at `https://acp-mobile.<tailnet>.ts.net/` from any device on your tailnet.
+```bash
+agent-to-go --web-app acp-mobile=8090
+```
 
-## Security
-
-- **Tailscale network**: only tailnet members can reach the server
-- **TLS**: tsnet provisions Let's Encrypt certificates automatically
-- **CSRF**: [filippo.io/csrf](https://pkg.go.dev/filippo.io/csrf) blocks cross-origin requests using browser `Sec-Fetch-Site` headers
-- **WebSocket origin check**: blocks cross-origin WebSocket upgrades
+This makes the UI available at `https://<tailnet-host>/app/acp-mobile/` from any device on your tailnet. agent-to-go handles Tailscale networking, TLS, and CSRF protection.
 
 ## Requirements
 
 - Go 1.21+
-- [Tailscale](https://tailscale.com) account
 - One or more [acp-multiplex](https://github.com/ElleNajt/acp-multiplex) proxies running

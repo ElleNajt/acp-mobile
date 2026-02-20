@@ -2,14 +2,12 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,33 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	csrf "filippo.io/csrf/gorilla"
 	"golang.org/x/net/websocket"
-	"tailscale.com/tsnet"
 )
 
-// checkWebSocketOrigin validates the Origin header on WebSocket upgrades.
-func checkWebSocketOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	originURL, err := url.Parse(origin)
-	if err != nil || originURL.Host != r.Host {
-		return false
-	}
-	return true
-}
-
 func main() {
-	local := false
 	port := "8090"
-	for _, arg := range os.Args[1:] {
-		if arg == "--local" {
-			local = true
-		} else {
-			port = arg
-		}
+	if len(os.Args) > 1 {
+		port = os.Args[1]
 	}
 
 	mux := http.NewServeMux()
@@ -75,9 +53,6 @@ func main() {
 			bridgeWebSocket(ws, sockPath)
 		},
 		Handshake: func(config *websocket.Config, r *http.Request) error {
-			if !checkWebSocketOrigin(r) {
-				return fmt.Errorf("origin not allowed: %s", r.Header.Get("Origin"))
-			}
 			config.Origin, _ = websocket.Origin(config, r)
 			return nil
 		},
@@ -87,40 +62,9 @@ func main() {
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
 
-	if local {
-		addr := fmt.Sprintf("127.0.0.1:%s", port)
-		log.Printf("acp-mobile (local): http://%s", addr)
-		log.Fatal(http.ListenAndServe(addr, mux))
-	}
-
-	// Tailscale mode
-	ts := &tsnet.Server{
-		Hostname: "acp-mobile",
-	}
-	defer ts.Close()
-
-	ln, err := ts.ListenTLS("tcp", ":443")
-	if err != nil {
-		log.Fatalf("tsnet ListenTLS: %v", err)
-	}
-	defer ln.Close()
-
-	status, err := ts.Up(context.Background())
-	if err != nil {
-		log.Fatalf("tsnet Up: %v", err)
-	}
-
-	csrfMiddleware := csrf.Protect(nil)
-
-	hostname := "acp-mobile"
-	if len(status.CertDomains) > 0 {
-		hostname = status.CertDomains[0]
-	}
-	fmt.Println()
-	fmt.Printf("  acp-mobile: https://%s\n", hostname)
-	fmt.Println()
-
-	log.Fatal(http.Serve(ln, csrfMiddleware(mux)))
+	addr := fmt.Sprintf("127.0.0.1:%s", port)
+	log.Printf("acp-mobile: http://%s", addr)
+	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
 // --- Socket discovery ---
