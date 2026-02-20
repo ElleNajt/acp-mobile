@@ -458,6 +458,9 @@ const chatViewEl = document.getElementById('chat-view');
 const navListEl = document.getElementById('nav-list');
 const backBtn = document.getElementById('back-btn');
 
+// Derive base path for proxy-safe URLs (e.g. "/app/acp-mobile/" -> "/app/acp-mobile")
+const basePath = location.pathname.replace(/\/$/, '');
+
 let ws, nextId = 100, sessionId = null;
 let currentAgentMsg = null;
 let processing = false;
@@ -725,7 +728,7 @@ function connect(pid) {
   clearTimeout(replayTimer);
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let url = proto + '//' + location.host + '/ws';
+  let url = proto + '//' + location.host + basePath + '/ws';
   if (pid) url += '?sock=' + pid;
 
   ws = new WebSocket(url);
@@ -1131,7 +1134,7 @@ async function fbNavigate(dirPath) {
   if (fbShowHidden) params.set('show_hidden', 'true');
 
   try {
-    const resp = await fetch('/files/list?' + params);
+    const resp = await fetch(basePath + '/files/list?' + params);
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     fbCurrentPath = data.path;
@@ -1190,7 +1193,7 @@ async function fbOpenFile(filePath) {
   fbViewerEl.classList.add('visible');
 
   try {
-    const resp = await fetch('/files/read?path=' + encodeURIComponent(filePath));
+    const resp = await fetch(basePath + '/files/read?path=' + encodeURIComponent(filePath));
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     fbvContentEl.textContent = data.content;
@@ -1234,7 +1237,7 @@ function timeAgo(ts) {
 async function loadSessions() {
   navListEl.innerHTML = '<div id="nav-empty">Loading...</div>';
   try {
-    const resp = await fetch('/api/sessions');
+    const resp = await fetch(basePath + '/api/sessions');
     if (!resp.ok) {
       // Not in discover mode -- single socket, go straight to chat
       discoverMode = false;
