@@ -49,6 +49,80 @@ body {
 }
 #header .stop-btn.visible { display: inline-block; }
 #header .stop-btn:active { background: #e68a00; }
+#header .files-btn {
+  background: transparent; border: 1px solid #555; border-radius: 6px;
+  color: #ccc; padding: 6px 10px; font-size: 12px; cursor: pointer;
+}
+#header .files-btn:active { opacity: 0.7; }
+
+/* File browser overlay */
+#file-browser {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #121212; z-index: 100; flex-direction: column;
+}
+#file-browser.visible { display: flex; }
+#fb-header {
+  display: flex; align-items: center; padding: 10px 12px;
+  background: #1e1e1e; border-bottom: 1px solid #333; gap: 8px;
+}
+#fb-header .fb-back {
+  background: transparent; border: none; color: #007AFF;
+  font-size: 16px; cursor: pointer; padding: 4px 8px;
+}
+#fb-header .fb-path {
+  flex: 1; font-size: 13px; color: #aaa;
+  font-family: "SF Mono", Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#fb-header .fb-close {
+  background: transparent; border: none; color: #888;
+  font-size: 20px; cursor: pointer; padding: 4px 8px;
+}
+#fb-header .fb-hidden-toggle {
+  background: transparent; border: 1px solid #555; border-radius: 4px;
+  color: #888; font-size: 10px; padding: 2px 6px; cursor: pointer;
+}
+#fb-header .fb-hidden-toggle.active { color: #4CAF50; border-color: #4CAF50; }
+#fb-list {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.fb-item {
+  display: flex; align-items: center; padding: 12px 16px;
+  border-bottom: 1px solid #1e1e1e; cursor: pointer; gap: 10px;
+}
+.fb-item:active { background: #1e1e1e; }
+.fb-item .fb-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+.fb-item .fb-name {
+  flex: 1; font-size: 15px; color: #e6edf3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fb-item .fb-size { font-size: 12px; color: #666; flex-shrink: 0; }
+.fb-item.dir .fb-name { color: #007AFF; }
+#fb-viewer {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #121212; z-index: 101; flex-direction: column;
+}
+#fb-viewer.visible { display: flex; }
+#fbv-header {
+  display: flex; align-items: center; padding: 10px 12px;
+  background: #1e1e1e; border-bottom: 1px solid #333; gap: 8px;
+}
+#fbv-header .fbv-back {
+  background: transparent; border: none; color: #007AFF;
+  font-size: 16px; cursor: pointer; padding: 4px 8px;
+}
+#fbv-header .fbv-path {
+  flex: 1; font-size: 13px; color: #aaa;
+  font-family: "SF Mono", Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left;
+}
+#fbv-content {
+  flex: 1; overflow: auto; padding: 12px;
+  font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+  color: #e0e0e0; white-space: pre-wrap; line-height: 1.5;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* Messages area */
 #messages {
@@ -261,8 +335,25 @@ body {
     </div>
   </div>
   <div class="header-actions">
+    <button class="files-btn" id="files-btn" onclick="openFileBrowser()">Files</button>
     <button class="stop-btn" id="stop-btn" onclick="cancelPrompt()">Stop</button>
   </div>
+</div>
+<div id="file-browser">
+  <div id="fb-header">
+    <button class="fb-back" id="fb-back" onclick="fbNavigateUp()">&larr;</button>
+    <span class="fb-path" id="fb-path"></span>
+    <button class="fb-hidden-toggle" id="fb-hidden-toggle" onclick="fbToggleHidden()">.*</button>
+    <button class="fb-close" onclick="closeFileBrowser()">&times;</button>
+  </div>
+  <div id="fb-list"></div>
+</div>
+<div id="fb-viewer">
+  <div id="fbv-header">
+    <button class="fbv-back" onclick="closeFileViewer()">&larr;</button>
+    <span class="fbv-path" id="fbv-path"></span>
+  </div>
+  <div id="fbv-content"></div>
 </div>
 <div id="messages"></div>
 <div id="thinking"><div class="spinner"></div><span class="label">Agent is thinking...</span></div>
@@ -290,6 +381,7 @@ let reconnectAttempts = 0;
 let reconnectTimer = null;
 let isAtBottom = true;
 let msgIdCounter = 0;
+let projectCwd = null;
 
 // Mode state
 let currentMode = 'default';
@@ -597,7 +689,10 @@ function handleMessage(msg) {
     if (msg.result && msg.result.sessionId) {
       sessionId = msg.result.sessionId;
       sendBtn.disabled = false;
-      // Extract modes from session/new response
+      // Extract cwd and modes from session/new response
+      if (msg.result.cwd) {
+        projectCwd = msg.result.cwd;
+      }
       if (msg.result.modes) {
         availableModes = msg.result.modes.availableModes || [];
         currentMode = msg.result.modes.currentModeId || 'default';
@@ -732,6 +827,134 @@ promptEl.oninput = () => {
   promptEl.style.height = 'auto';
   promptEl.style.height = Math.min(promptEl.scrollHeight, 120) + 'px';
 };
+
+// --- File browser ---
+
+const fbEl = document.getElementById('file-browser');
+const fbListEl = document.getElementById('fb-list');
+const fbPathEl = document.getElementById('fb-path');
+const fbViewerEl = document.getElementById('fb-viewer');
+const fbvPathEl = document.getElementById('fbv-path');
+const fbvContentEl = document.getElementById('fbv-content');
+const fbHiddenToggle = document.getElementById('fb-hidden-toggle');
+
+let fbCurrentPath = '';
+let fbHistory = [];
+let fbShowHidden = false;
+
+const FB_EXT_ICONS = {
+  js: '{}', ts: '{}', tsx: '{}', jsx: '{}',
+  py: '#', rb: '#', go: '#', rs: '#', c: '#', h: '#', cpp: '#',
+  json: '{}', yaml: '~', yml: '~', toml: '~',
+  md: 'M', txt: 'T', org: 'O',
+  sh: '$', bash: '$', zsh: '$',
+  html: '<>', css: '#', svg: '<>',
+  el: 'L', clj: 'L', lisp: 'L',
+};
+
+function fbFileIcon(name, isDir) {
+  if (isDir) return '\uD83D\uDCC1';
+  const ext = name.split('.').pop().toLowerCase();
+  return FB_EXT_ICONS[ext] || '\uD83D\uDCC4';
+}
+
+function fbFormatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function openFileBrowser() {
+  const startPath = projectCwd || '/';
+  fbHistory = [];
+  await fbNavigate(startPath);
+  fbEl.classList.add('visible');
+}
+
+function closeFileBrowser() {
+  fbEl.classList.remove('visible');
+}
+
+function closeFileViewer() {
+  fbViewerEl.classList.remove('visible');
+}
+
+async function fbNavigate(dirPath) {
+  fbCurrentPath = dirPath;
+  fbPathEl.textContent = shortPath(dirPath);
+  fbListEl.innerHTML = '<div style="padding:16px;color:#888">Loading...</div>';
+
+  const params = new URLSearchParams({ path: dirPath });
+  if (fbShowHidden) params.set('show_hidden', 'true');
+
+  try {
+    const resp = await fetch('/files/list?' + params);
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    fbCurrentPath = data.path;
+    fbPathEl.textContent = shortPath(data.path);
+    renderFileList(data.files || []);
+  } catch (err) {
+    fbListEl.innerHTML = '<div style="padding:16px;color:#F44336">' + escHtml(err.message) + '</div>';
+  }
+}
+
+function renderFileList(files) {
+  fbListEl.innerHTML = '';
+  if (files.length === 0) {
+    fbListEl.innerHTML = '<div style="padding:16px;color:#666;text-align:center">Empty directory</div>';
+    return;
+  }
+  for (const f of files) {
+    const d = document.createElement('div');
+    d.className = 'fb-item' + (f.isDir ? ' dir' : '');
+    const icon = fbFileIcon(f.name, f.isDir);
+    const sizeStr = f.isDir ? '' : fbFormatSize(f.size || 0);
+    d.innerHTML =
+      '<span class="fb-icon">' + icon + '</span>' +
+      '<span class="fb-name">' + escHtml(f.name) + '</span>' +
+      '<span class="fb-size">' + sizeStr + '</span>';
+    if (f.isDir) {
+      d.onclick = () => {
+        fbHistory.push(fbCurrentPath);
+        fbNavigate(fbCurrentPath + '/' + f.name);
+      };
+    } else {
+      d.onclick = () => fbOpenFile(fbCurrentPath + '/' + f.name);
+    }
+    fbListEl.appendChild(d);
+  }
+}
+
+function fbNavigateUp() {
+  if (fbHistory.length > 0) {
+    fbNavigate(fbHistory.pop());
+  } else if (fbCurrentPath !== '/') {
+    const parent = fbCurrentPath.replace(/\/[^/]+$/, '') || '/';
+    fbNavigate(parent);
+  }
+}
+
+function fbToggleHidden() {
+  fbShowHidden = !fbShowHidden;
+  fbHiddenToggle.classList.toggle('active', fbShowHidden);
+  fbNavigate(fbCurrentPath);
+}
+
+async function fbOpenFile(filePath) {
+  fbvPathEl.textContent = shortPath(filePath);
+  fbvContentEl.textContent = 'Loading...';
+  fbViewerEl.classList.add('visible');
+
+  try {
+    const resp = await fetch('/files/read?path=' + encodeURIComponent(filePath));
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    fbvContentEl.textContent = data.content;
+  } catch (err) {
+    fbvContentEl.textContent = 'Error: ' + err.message;
+  }
+}
 
 connect();
 </script>
