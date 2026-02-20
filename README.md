@@ -8,20 +8,22 @@ Discovers all live acp-multiplex sockets on the machine, shows them grouped by p
 
 ```bash
 go build -o acp-mobile .
-./acp-mobile [port]  # default 8090
+./acp-mobile
 ```
 
-The server binds to `127.0.0.1` only. To access it from your phone, use [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve):
+The server joins your tailnet as `acp-mobile` using [tsnet](https://tailscale.com/kb/1244/tsnet) and listens on HTTPS with automatic TLS certificates. On first run it will print a Tailscale auth URL — visit it to authorize the node.
 
-```bash
-# Expose the local server over your tailnet with HTTPS
-tailscale serve --bg 8090
-```
+Once authorized, the UI is available at `https://acp-mobile.<tailnet>.ts.net/` from any device on your tailnet.
 
-This makes the UI available at `https://<your-machine>.<tailnet>.ts.net/` from any device on your tailnet — no port forwarding, no public exposure.
+## Security
+
+- **Tailscale network**: only tailnet members can reach the server
+- **TLS**: tsnet provisions Let's Encrypt certificates automatically
+- **CSRF**: [filippo.io/csrf](https://pkg.go.dev/filippo.io/csrf) blocks cross-origin requests using browser `Sec-Fetch-Site` headers
+- **WebSocket origin check**: blocks cross-origin WebSocket upgrades
 
 ## Requirements
 
 - Go 1.21+
-- One or more [acp-multiplex](https://github.com/ElleNajt/acp-multiplex) proxies running (sockets in `$TMPDIR/acp-multiplex/`)
-- [Tailscale](https://tailscale.com) for remote access from your phone
+- [Tailscale](https://tailscale.com) account
+- One or more [acp-multiplex](https://github.com/ElleNajt/acp-multiplex) proxies running

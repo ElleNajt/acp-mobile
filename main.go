@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,25 +19,39 @@ import (
 	"syscall"
 	"time"
 
+	csrf "filippo.io/csrf/gorilla"
 	"golang.org/x/net/websocket"
+	"tailscale.com/tsnet"
 )
 
-// allowedOrigin checks that the request Origin matches the server's own host.
-// Blocks cross-site requests (CSRF/WebSocket hijacking).
-func allowedOrigin(r *http.Request) bool {
+// checkWebSocketOrigin validates the Origin header on WebSocket upgrades.
+func checkWebSocketOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		return true // non-browser requests (curl, etc.)
+		return true
 	}
-	host := r.Host
-	// Origin includes scheme, Host does not
-	return origin == "http://"+host || origin == "https://"+host
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Host != r.Host {
+		return false
+	}
+	return true
 }
 
 func main() {
-	port := "8090"
-	if len(os.Args) > 1 {
-		port = os.Args[1]
+	ts := &tsnet.Server{
+		Hostname: "acp-mobile",
+	}
+	defer ts.Close()
+
+	ln, err := ts.ListenTLS("tcp", ":443")
+	if err != nil {
+		log.Fatalf("tsnet ListenTLS: %v", err)
+	}
+	defer ln.Close()
+
+	status, err := ts.Up(context.Background())
+	if err != nil {
+		log.Fatalf("tsnet Up: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -65,7 +81,7 @@ func main() {
 			bridgeWebSocket(ws, sockPath)
 		},
 		Handshake: func(config *websocket.Config, r *http.Request) error {
-			if !allowedOrigin(r) {
+			if !checkWebSocketOrigin(r) {
 				return fmt.Errorf("origin not allowed: %s", r.Header.Get("Origin"))
 			}
 			config.Origin, _ = websocket.Origin(config, r)
@@ -73,24 +89,21 @@ func main() {
 		},
 	})
 
-	// Wrap API handlers with origin check
-	checkOrigin := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if !allowedOrigin(r) {
-				http.Error(w, "origin not allowed", http.StatusForbidden)
-				return
-			}
-			next(w, r)
-		}
+	mux.HandleFunc("/api/sessions", handleSessions)
+	mux.HandleFunc("/files/list", handleFileList)
+	mux.HandleFunc("/files/read", handleFileRead)
+
+	csrfMiddleware := csrf.Protect(nil)
+
+	hostname := "acp-mobile"
+	if len(status.CertDomains) > 0 {
+		hostname = status.CertDomains[0]
 	}
+	fmt.Println()
+	fmt.Printf("  acp-mobile: https://%s\n", hostname)
+	fmt.Println()
 
-	mux.HandleFunc("/api/sessions", checkOrigin(handleSessions))
-	mux.HandleFunc("/files/list", checkOrigin(handleFileList))
-	mux.HandleFunc("/files/read", checkOrigin(handleFileRead))
-
-	addr := fmt.Sprintf("127.0.0.1:%s", port)
-	log.Printf("acp-mobile: http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.Serve(ln, csrfMiddleware(mux)))
 }
 
 // --- Socket discovery ---
@@ -157,14 +170,11 @@ func discoverSockets() []socketEntry {
 	return socks
 }
 
-// findSocket returns the socket path for a given pid string.
 func findSocket(pidStr string) string {
-	// New location
 	p := filepath.Join(socketDir(), pidStr+".sock")
 	if _, err := os.Stat(p); err == nil {
 		return p
 	}
-	// Legacy
 	p = filepath.Join(os.TempDir(), "acp-multiplex-"+pidStr+".sock")
 	if _, err := os.Stat(p); err == nil {
 		return p
@@ -219,7 +229,6 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 func probeSocket(sockPath string, pid int) sessionInfo {
 	info := sessionInfo{Pid: pid}
 
-	// Get cwd from the process via lsof
 	info.Cwd = processCwd(pid)
 	if info.Cwd != "" {
 		info.Project = filepath.Base(info.Cwd)
@@ -294,7 +303,6 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 	return info
 }
 
-// processCwd gets the working directory of a process via lsof.
 func processCwd(pid int) string {
 	out, err := exec.Command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output()
 	if err != nil {
