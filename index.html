@@ -26,11 +26,11 @@ body {
 #nav-header .nav-title {
   flex: 1; font-size: 20px; font-weight: 700; color: #fff;
 }
-#nav-header .nav-refresh {
+#nav-header .nav-btn {
   background: transparent; border: none; color: #007AFF;
-  font-size: 20px; cursor: pointer; padding: 4px 8px;
+  font-size: 14px; cursor: pointer; padding: 4px 8px;
 }
-#nav-header .nav-refresh:active { opacity: 0.6; }
+#nav-header .nav-btn:active { opacity: 0.6; }
 #nav-list {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
@@ -52,7 +52,12 @@ body {
 .session-card:active { background: #1e1e1e; }
 .session-card .sc-dot {
   width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-  margin-top: 4px; background: #3fb950;
+  margin-top: 4px; background: #555;
+}
+.session-card.unread .sc-dot { background: #3fb950; }
+.session-card .sc-time {
+  font-size: 11px; color: #555; margin-top: 2px;
+  font-family: "SF Mono", Menlo, monospace;
 }
 .session-card .sc-info { flex: 1; min-width: 0; }
 .session-card .sc-name {
@@ -393,7 +398,8 @@ body {
 <div id="navigator">
   <div id="nav-header">
     <span class="nav-title">Sessions</span>
-    <button class="nav-refresh" onclick="loadSessions()">&#8635;</button>
+    <button class="nav-btn" id="sort-btn" onclick="toggleSort()">Recent</button>
+    <button class="nav-btn" onclick="loadSessions()">&#8635;</button>
   </div>
   <div id="nav-list"></div>
 </div>
@@ -1196,6 +1202,34 @@ async function fbOpenFile(filePath) {
 // --- Navigator ---
 
 let discoverMode = false;
+let sortMode = localStorage.getItem('acp-sort') || 'project'; // 'project' or 'recent'
+let lastSessions = [];
+
+function getLastViewed(pid) {
+  return parseInt(localStorage.getItem('acp-viewed-' + pid) || '0', 10);
+}
+function markViewed(pid) {
+  localStorage.setItem('acp-viewed-' + pid, String(Math.floor(Date.now() / 1000)));
+}
+function isUnread(session) {
+  if (!session.lastActivity) return false;
+  return session.lastActivity > getLastViewed(session.pid);
+}
+function toggleSort() {
+  sortMode = sortMode === 'project' ? 'recent' : 'project';
+  localStorage.setItem('acp-sort', sortMode);
+  document.getElementById('sort-btn').textContent = sortMode === 'project' ? 'Recent' : 'Project';
+  renderSessions(lastSessions);
+}
+
+function timeAgo(ts) {
+  if (!ts) return '';
+  const secs = Math.floor(Date.now() / 1000) - ts;
+  if (secs < 60) return 'now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h';
+  return Math.floor(secs / 86400) + 'd';
+}
 
 async function loadSessions() {
   navListEl.innerHTML = '<div id="nav-empty">Loading...</div>';
@@ -1225,7 +1259,18 @@ async function loadSessions() {
 }
 
 function renderSessions(sessions) {
+  lastSessions = sessions;
   navListEl.innerHTML = '';
+  document.getElementById('sort-btn').textContent = sortMode === 'project' ? 'Recent' : 'Project';
+
+  if (sortMode === 'recent') {
+    // Flat list sorted by lastActivity descending
+    const sorted = [...sessions].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+    for (const s of sorted) {
+      navListEl.appendChild(makeSessionCard(s, s.bufferName || sessionDisplayName(s)));
+    }
+    return;
+  }
 
   // Group by project
   const groups = new Map();
@@ -1235,7 +1280,6 @@ function renderSessions(sessions) {
     groups.get(proj).push(s);
   }
 
-  // Sort groups alphabetically
   const sortedKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
 
   for (const proj of sortedKeys) {
@@ -1248,32 +1292,41 @@ function renderSessions(sessions) {
     header.textContent = proj;
     groupEl.appendChild(header);
 
-    // Assign buffer-style names with <N> suffix for duplicates
     for (let i = 0; i < group.length; i++) {
       const s = group[i];
       const suffix = group.length > 1 ? (i === 0 ? '' : '<' + (i + 1) + '>') : '';
-      const bufferName = s.bufferName
+      const name = s.bufferName
         || ((s.title || 'Claude Code') + ' Agent @ ' + proj + suffix);
-
-      const d = document.createElement('div');
-      d.className = 'session-card';
-      d.innerHTML =
-        '<div class="sc-dot"></div>' +
-        '<div class="sc-info">' +
-          '<div class="sc-name">' + escHtml(bufferName) + '</div>' +
-          (s.cwd ? '<div class="sc-path">' + escHtml(shortPath(s.cwd)) + '</div>' : '') +
-        '</div>';
-      d.onclick = () => selectSession(s);
-      groupEl.appendChild(d);
+      groupEl.appendChild(makeSessionCard(s, name));
     }
 
     navListEl.appendChild(groupEl);
   }
 }
 
+function sessionDisplayName(s) {
+  const proj = s.project || 'unknown';
+  return (s.title || 'Claude Code') + ' Agent @ ' + proj;
+}
+
+function makeSessionCard(s, name) {
+  const unread = isUnread(s);
+  const d = document.createElement('div');
+  d.className = 'session-card' + (unread ? ' unread' : '');
+  d.innerHTML =
+    '<div class="sc-dot"></div>' +
+    '<div class="sc-info">' +
+      '<div class="sc-name">' + escHtml(name) + '</div>' +
+      (s.cwd ? '<div class="sc-path">' + escHtml(shortPath(s.cwd)) + '</div>' : '') +
+      (s.lastActivity ? '<div class="sc-time">' + timeAgo(s.lastActivity) + '</div>' : '') +
+    '</div>';
+  d.onclick = () => selectSession(s);
+  return d;
+}
+
 function selectSession(session) {
+  markViewed(session.pid);
   currentSockPid = session.pid;
-  // Reset chat state
   messagesEl.innerHTML = '';
   currentAgentMsg = null;
   sessionId = null;

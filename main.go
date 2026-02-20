@@ -78,8 +78,9 @@ func socketDir() string {
 }
 
 type socketEntry struct {
-	pid  int
-	path string
+	pid   int
+	path  string
+	mtime int64
 }
 
 func discoverSockets() []socketEntry {
@@ -103,7 +104,11 @@ func discoverSockets() []socketEntry {
 				continue
 			}
 			seen[pid] = true
-			socks = append(socks, socketEntry{pid, filepath.Join(dir, name)})
+			var mt int64
+			if info, err := e.Info(); err == nil {
+				mt = info.ModTime().Unix()
+			}
+			socks = append(socks, socketEntry{pid, filepath.Join(dir, name), mt})
 		}
 	}
 
@@ -124,7 +129,11 @@ func discoverSockets() []socketEntry {
 				os.Remove(filepath.Join(tmpdir, name))
 				continue
 			}
-			socks = append(socks, socketEntry{pid, filepath.Join(tmpdir, name)})
+			var mt int64
+			if info, err := e.Info(); err == nil {
+				mt = info.ModTime().Unix()
+			}
+			socks = append(socks, socketEntry{pid, filepath.Join(tmpdir, name), mt})
 		}
 	}
 
@@ -146,12 +155,13 @@ func findSocket(pidStr string) string {
 // --- Session probing ---
 
 type sessionInfo struct {
-	Pid        int    `json:"pid"`
-	SessionID  string `json:"sessionId,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Cwd        string `json:"cwd,omitempty"`
-	Project    string `json:"project,omitempty"`
-	BufferName string `json:"bufferName,omitempty"`
+	Pid          int    `json:"pid"`
+	SessionID    string `json:"sessionId,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Cwd          string `json:"cwd,omitempty"`
+	Project      string `json:"project,omitempty"`
+	BufferName   string `json:"bufferName,omitempty"`
+	LastActivity int64  `json:"lastActivity"` // unix timestamp
 }
 
 func handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -172,6 +182,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer wg.Done()
 			info := probeSocket(sock.path, sock.pid)
+			info.LastActivity = sock.mtime
 			results[idx] = result{info: info, ok: true}
 		}()
 	}
