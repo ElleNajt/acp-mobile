@@ -399,6 +399,7 @@ body {
   <div id="nav-header">
     <span class="nav-title">Sessions</span>
     <button class="nav-btn" id="sort-btn" onclick="toggleSort()">Recent</button>
+    <button class="nav-btn" onclick="spawnAgent()">+</button>
     <button class="nav-btn" onclick="loadSessions()">&#8635;</button>
   </div>
   <div id="nav-list"></div>
@@ -415,6 +416,7 @@ body {
   </div>
   <div class="header-actions">
     <button class="files-btn" id="files-btn" onclick="openFileBrowser()">Files</button>
+    <button class="files-btn" id="kill-btn" onclick="killSession()" style="color:#F44336;border-color:#F44336;display:none">Kill</button>
   </div>
 </div>
 <div id="file-browser">
@@ -470,6 +472,7 @@ let isAtBottom = true;
 let msgIdCounter = 0;
 let projectCwd = null;
 let currentSockPid = null;
+let currentBufferName = null;
 
 // Mode state
 let currentMode = 'default';
@@ -1029,6 +1032,8 @@ function flushReplay() {
     // Notifications
     if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
       headerTitle.textContent = msg.params.name;
+      currentBufferName = msg.params.name;
+      document.getElementById('kill-btn').style.display = '';
       continue;
     }
     if (msg.method !== 'session/update' || !msg.params) continue;
@@ -1149,6 +1154,8 @@ function handleMessage(msg) {
   // Buffer name from acp-multiplex
   if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
     headerTitle.textContent = msg.params.name;
+    currentBufferName = msg.params.name;
+    document.getElementById('kill-btn').style.display = '';
     return;
   }
 
@@ -1559,6 +1566,8 @@ function selectSession(session) {
   currentAgentMsg = null;
   sessionId = null;
   projectCwd = session.cwd || null;
+  currentBufferName = session.bufferName || null;
+  document.getElementById('kill-btn').style.display = currentBufferName ? '' : 'none';
   availableModes = [];
   allReplayTurns = [];
   renderedTurnStart = 0;
@@ -1595,6 +1604,75 @@ function showNavigator() {
 
 function navigateBack() {
   showNavigator();
+}
+
+async function spawnAgent() {
+  // Get a cwd to spawn into — use first session's cwd or prompt
+  let cwd = '';
+  if (lastSessions.length > 0) {
+    // Pick from existing project cwds
+    const cwds = [...new Set(lastSessions.map(s => s.cwd).filter(Boolean))];
+    if (cwds.length === 1) {
+      cwd = cwds[0];
+    } else if (cwds.length > 1) {
+      const choice = window.prompt(
+        'Project directory:\n' + cwds.map((c, i) => (i + 1) + '. ' + shortPath(c)).join('\n') +
+        '\n\nEnter number or full path:');
+      if (!choice) return;
+      const num = parseInt(choice);
+      cwd = (num >= 1 && num <= cwds.length) ? cwds[num - 1] : choice;
+    }
+  }
+  if (!cwd) {
+    cwd = window.prompt('Project directory (full path):');
+    if (!cwd) return;
+  }
+
+  const name = window.prompt('Agent name:');
+  if (!name) return;
+
+  const task = window.prompt('Initial task (optional):') || '';
+
+  try {
+    const resp = await fetch(basePath + '/api/spawn', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cwd, name, task })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Spawn failed: ' + data.error);
+      return;
+    }
+    // Refresh after a short delay to let the session start
+    setTimeout(loadSessions, 2000);
+  } catch (err) {
+    alert('Spawn failed: ' + err.message);
+  }
+}
+
+async function killSession() {
+  if (!currentBufferName) {
+    alert('No buffer name available for this session');
+    return;
+  }
+  if (!window.confirm('Kill session "' + currentBufferName + '"?')) return;
+
+  try {
+    const resp = await fetch(basePath + '/api/kill', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bufferName: currentBufferName })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Kill failed: ' + data.error);
+      return;
+    }
+    showNavigator();
+  } catch (err) {
+    alert('Kill failed: ' + err.message);
+  }
 }
 
 // Start: try loading sessions (discover mode), fall back to direct connect

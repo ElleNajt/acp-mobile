@@ -147,6 +147,8 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/sessions", handleSessions)
+	mux.HandleFunc("/api/spawn", handleSpawn)
+	mux.HandleFunc("/api/kill", handleKill)
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
 
@@ -367,6 +369,88 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
+}
+
+func handleSpawn(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Cwd  string `json:"cwd"`
+		Name string `json:"name"`
+		Task string `json:"task"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.Cwd == "" {
+		http.Error(w, "name and cwd are required", http.StatusBadRequest)
+		return
+	}
+
+	args := []string{req.Name, req.Cwd}
+	if req.Task != "" {
+		args = append(args, req.Task)
+	}
+
+	out, err := exec.Command("agent-shell-spawn", args...).CombinedOutput()
+	if err != nil {
+		log.Printf("spawn: %v: %s", err, out)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("%v: %s", err, strings.TrimSpace(string(out)))})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func handleKill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		BufferName string `json:"bufferName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.BufferName == "" {
+		http.Error(w, "bufferName is required", http.StatusBadRequest)
+		return
+	}
+
+	// Escape double quotes in buffer name for elisp string
+	escaped := strings.ReplaceAll(req.BufferName, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	expr := fmt.Sprintf(`(meta-agent-shell-close-session "%s")`, escaped)
+
+	out, err := exec.Command("emacsclient", "--eval", expr).CombinedOutput()
+	if err != nil {
+		log.Printf("kill: %v: %s", err, out)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("%v: %s", err, strings.TrimSpace(string(out)))})
+		return
+	}
+
+	result := strings.TrimSpace(string(out))
+	if result == "nil" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "session not found or already closed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func probeSocket(sockPath string, pid int) sessionInfo {

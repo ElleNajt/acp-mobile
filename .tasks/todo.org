@@ -10,14 +10,15 @@ setProcessing(true) is only called from sendPrompt(). If you connect
 mid-conversation while the agent is running tools, Stop never appears.
 Fixed: detect active processing from replay/live tool_call and agent_message_chunk events.
 
-* TODO Kill buffers via agent-shell
-Add HTTP endpoint that calls emacsclient to invoke
-meta-agent-shell-close-session with the buffer name.
-Part of configurable control buttons.
+* DONE Kill buffers via agent-shell
+POST /api/kill calls emacsclient to invoke meta-agent-shell-close-session.
+Kill button in chat header (red), hidden until bufferName is known.
+Confirms before killing. Returns to session list on success.
 
-* TODO Start new buffers via agent-shell
-Add HTTP endpoint that calls agent-shell-spawn.
-Part of configurable control buttons.
+* DONE Start new buffers via agent-shell
+POST /api/spawn calls agent-shell-spawn with name, cwd, and optional task.
+"+" button in navigator header. Auto-picks project dir from existing sessions
+or prompts for path. Refreshes session list after spawn.
 
 * DONE Message queuing
 Queue messages typed while agent is still processing.
