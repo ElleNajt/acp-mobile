@@ -38,20 +38,14 @@ func checkWebSocketOrigin(r *http.Request) bool {
 }
 
 func main() {
-	ts := &tsnet.Server{
-		Hostname: "acp-mobile",
-	}
-	defer ts.Close()
-
-	ln, err := ts.ListenTLS("tcp", ":443")
-	if err != nil {
-		log.Fatalf("tsnet ListenTLS: %v", err)
-	}
-	defer ln.Close()
-
-	status, err := ts.Up(context.Background())
-	if err != nil {
-		log.Fatalf("tsnet Up: %v", err)
+	local := false
+	port := "8090"
+	for _, arg := range os.Args[1:] {
+		if arg == "--local" {
+			local = true
+		} else {
+			port = arg
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -92,6 +86,29 @@ func main() {
 	mux.HandleFunc("/api/sessions", handleSessions)
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
+
+	if local {
+		addr := fmt.Sprintf("127.0.0.1:%s", port)
+		log.Printf("acp-mobile (local): http://%s", addr)
+		log.Fatal(http.ListenAndServe(addr, mux))
+	}
+
+	// Tailscale mode
+	ts := &tsnet.Server{
+		Hostname: "acp-mobile",
+	}
+	defer ts.Close()
+
+	ln, err := ts.ListenTLS("tcp", ":443")
+	if err != nil {
+		log.Fatalf("tsnet ListenTLS: %v", err)
+	}
+	defer ln.Close()
+
+	status, err := ts.Up(context.Background())
+	if err != nil {
+		log.Fatalf("tsnet Up: %v", err)
+	}
 
 	csrfMiddleware := csrf.Protect(nil)
 
