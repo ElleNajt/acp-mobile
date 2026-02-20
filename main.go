@@ -20,6 +20,18 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+// allowedOrigin checks that the request Origin matches the server's own host.
+// Blocks cross-site requests (CSRF/WebSocket hijacking).
+func allowedOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // non-browser requests (curl, etc.)
+	}
+	host := r.Host
+	// Origin includes scheme, Host does not
+	return origin == "http://"+host || origin == "https://"+host
+}
+
 func main() {
 	port := "8090"
 	if len(os.Args) > 1 {
@@ -53,14 +65,28 @@ func main() {
 			bridgeWebSocket(ws, sockPath)
 		},
 		Handshake: func(config *websocket.Config, r *http.Request) error {
+			if !allowedOrigin(r) {
+				return fmt.Errorf("origin not allowed: %s", r.Header.Get("Origin"))
+			}
 			config.Origin, _ = websocket.Origin(config, r)
 			return nil
 		},
 	})
 
-	mux.HandleFunc("/api/sessions", handleSessions)
-	mux.HandleFunc("/files/list", handleFileList)
-	mux.HandleFunc("/files/read", handleFileRead)
+	// Wrap API handlers with origin check
+	checkOrigin := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !allowedOrigin(r) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("/api/sessions", checkOrigin(handleSessions))
+	mux.HandleFunc("/files/list", checkOrigin(handleFileList))
+	mux.HandleFunc("/files/read", checkOrigin(handleFileRead))
 
 	addr := fmt.Sprintf("127.0.0.1:%s", port)
 	log.Printf("acp-mobile: http://%s", addr)
