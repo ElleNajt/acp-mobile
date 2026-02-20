@@ -9,185 +9,240 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
-  background: #0d1117; color: #e6edf3;
+  background: #121212; color: #e6edf3;
   height: 100dvh; display: flex; flex-direction: column;
   overflow: hidden;
 }
 
 /* Status bar */
 #status {
-  padding: 6px 16px; font-size: 12px; color: #8b949e;
-  border-bottom: 1px solid #21262d; flex-shrink: 0;
+  padding: 6px 16px; font-size: 12px; color: #888;
+  border-bottom: 1px solid #333; flex-shrink: 0;
   display: flex; justify-content: space-between; align-items: center;
+  background: #1e1e1e;
 }
 #status.connected { color: #3fb950; }
 #status.error { color: #f85149; }
 #status .cancel-btn {
-  background: #da3633; color: #fff; border: none; border-radius: 6px;
-  padding: 4px 12px; font-size: 12px; cursor: pointer; display: none;
+  background: #FF9800; color: #fff; border: none; border-radius: 6px;
+  padding: 6px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; display: none;
 }
 #status .cancel-btn.visible { display: inline-block; }
-#status .cancel-btn:active { background: #b62324; }
+#status .cancel-btn:active { background: #e68a00; }
 
 /* Messages area */
 #messages {
-  flex: 1; overflow-y: auto; padding: 12px 16px;
+  flex: 1; overflow-y: auto; padding: 16px;
   -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
 }
 
-/* Message bubbles */
+/* Shared message container */
 .msg {
-  margin-bottom: 12px; max-width: 88%; line-height: 1.5;
-  padding: 10px 14px; border-radius: 16px; word-wrap: break-word;
-  overflow-wrap: break-word;
+  margin-bottom: 12px; padding: 12px; border-radius: 12px;
+  line-height: 1.5; word-wrap: break-word; overflow-wrap: break-word;
 }
+
+/* Role label */
+.msg .role {
+  font-size: 11px; font-weight: 600; color: #aaa;
+  margin-bottom: 4px; display: block;
+}
+
+/* User messages */
 .msg.user {
-  background: #1f6feb; color: #fff; align-self: flex-end;
-  margin-left: auto; border-bottom-right-radius: 4px;
+  background: #007AFF; max-width: 85%; align-self: flex-end;
+  margin-left: auto;
 }
+.msg.user .role { color: rgba(255,255,255,0.7); }
+.msg.user .text { color: #fff; font-size: 15px; line-height: 22px; }
+.msg.user .meta {
+  display: flex; justify-content: flex-end; align-items: center;
+  gap: 4px; margin-top: 6px;
+}
+.msg.user .meta .time { color: rgba(255,255,255,0.5); font-size: 10px; }
+.msg.user .meta .delivery { color: #4CAF50; font-size: 10px; }
+
+/* Agent messages */
 .msg.agent {
-  background: #161b22; border: 1px solid #21262d;
-  border-bottom-left-radius: 4px;
+  background: #2d2d2d; max-width: 85%; width: 85%;
+  align-self: flex-start;
 }
+.msg.agent .role { color: #aaa; }
+
+/* Thought messages */
 .msg.thought {
   background: transparent; color: #8b949e; font-style: italic;
-  font-size: 13px; padding: 4px 14px; max-width: 100%;
+  font-size: 13px; padding: 4px 16px; max-width: 100%;
 }
+
+/* System messages */
 .msg.system {
-  background: transparent; color: #8b949e; font-size: 12px;
-  text-align: center; max-width: 100%; padding: 4px 0;
+  background: transparent; padding: 8px 16px; max-width: 100%;
+  text-align: center;
+}
+.msg.system .text {
+  color: #FF9800; font-size: 12px; font-style: italic;
+}
+
+/* Error messages */
+.msg.error {
+  background: #3d1a1a; border-left: 3px solid #F44336;
+  border-radius: 8px; padding: 12px; max-width: 100%;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.msg.error .error-icon { font-size: 16px; flex-shrink: 0; }
+.msg.error .text {
+  color: #F44336; font-size: 14px;
+  font-family: "SF Mono", Menlo, monospace; flex: 1;
 }
 
 /* Tool calls */
 .msg.tool {
-  background: #0d1117; border-left: 3px solid #d2a8ff;
+  background: #1a1a2e; border-left: 3px solid #FF9800;
   border-radius: 8px; padding: 8px 12px; max-width: 100%;
   font-size: 13px; cursor: pointer; user-select: none;
   -webkit-user-select: none;
 }
 .msg.tool .tool-header {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: flex-start; gap: 8px;
 }
 .msg.tool .tool-icon { font-size: 14px; flex-shrink: 0; }
+.msg.tool .tool-info { flex: 1; min-width: 0; }
 .msg.tool .tool-name {
-  font-family: "SF Mono", Menlo, monospace; font-size: 12px;
-  color: #d2a8ff; flex: 1; overflow: hidden;
+  font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+  color: #ccc; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg.tool .tool-name.completed { color: #4CAF50; }
+.msg.tool .tool-name.failed { color: #F44336; }
+.msg.tool .tool-path {
+  font-family: "SF Mono", Menlo, monospace; font-size: 11px;
+  color: #888; margin-top: 2px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.msg.tool .tool-expand { color: #484f58; font-size: 10px; }
+.msg.tool .tool-expand { color: #666; font-size: 10px; margin-left: 8px; }
 .msg.tool .tool-body {
-  display: none; margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid #21262d;
+  display: none; margin-top: 8px; padding: 8px;
+  background: #0d0d1a; border-radius: 6px;
   font-family: "SF Mono", Menlo, monospace; font-size: 11px;
-  color: #8b949e; white-space: pre-wrap; max-height: 300px;
-  overflow-y: auto; line-height: 1.4;
+  color: #e0e0e0; white-space: pre-wrap; max-height: 300px;
+  overflow-y: auto; line-height: 16px;
 }
 .msg.tool.expanded .tool-body { display: block; }
-.msg.tool.expanded .tool-expand::after { content: ""; }
-.msg.tool .tool-status { font-size: 11px; color: #8b949e; }
-.msg.tool .tool-status.running { color: #d29922; }
-.msg.tool .tool-status.completed { color: #3fb950; }
-.msg.tool .tool-status.failed { color: #f85149; }
+.msg.tool .tool-hint {
+  color: #666; font-size: 10px; margin-top: 4px; font-style: italic;
+}
+.msg.tool.expanded .tool-hint { display: none; }
+
+/* Diff rendering in tool bodies */
+.msg.tool .diff-header { color: #888; font-weight: 600; }
+.msg.tool .diff-removed {
+  color: #f87171; background: rgba(248,113,113,0.1);
+}
+.msg.tool .diff-added {
+  color: #4ade80; background: rgba(74,222,128,0.1);
+}
 
 /* Thinking indicator */
 #thinking {
-  display: none; padding: 8px 16px;
-  border-top: 1px solid #21262d; flex-shrink: 0;
+  display: none; padding: 8px 16px; flex-shrink: 0;
+  background: #1a1a2e; border-top: 1px solid #333;
 }
 #thinking.visible { display: flex; align-items: center; gap: 8px; }
-#thinking .dots { color: #58a6ff; font-size: 14px; }
-#thinking .dots span {
-  animation: blink 1.4s infinite both;
-  display: inline-block;
+#thinking .spinner {
+  width: 16px; height: 16px; border: 2px solid #333;
+  border-top-color: #007AFF; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
-#thinking .dots span:nth-child(2) { animation-delay: 0.2s; }
-#thinking .dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
-#thinking .label { color: #8b949e; font-size: 13px; font-style: italic; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#thinking .label { color: #888; font-size: 13px; font-style: italic; }
 
 /* Scroll-to-bottom button */
 #scroll-btn {
   display: none; position: fixed; bottom: 80px; right: 16px;
-  width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(31,111,235,0.9); border: none; color: #fff;
-  font-size: 18px; cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  z-index: 10;
+  width: 44px; height: 44px; border-radius: 22px;
+  background: rgba(0,122,255,0.9); border: none; color: #fff;
+  font-size: 20px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 10;
 }
-#scroll-btn.visible { display: flex; align-items: center; justify-content: center; }
-#scroll-btn:active { background: rgba(31,111,235,1); }
+#scroll-btn.visible {
+  display: flex; align-items: center; justify-content: center;
+}
+#scroll-btn:active { background: rgba(0,122,255,1); }
 
 /* Input area */
 #input-area {
-  border-top: 1px solid #21262d; padding: 10px 12px;
-  display: flex; gap: 8px; flex-shrink: 0;
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
-  background: #0d1117;
+  border-top: 1px solid #333; padding: 12px;
+  display: flex; gap: 10px; flex-shrink: 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: #1e1e1e; align-items: flex-end;
 }
 #prompt {
-  flex: 1; background: #161b22; border: 1px solid #30363d;
-  border-radius: 20px; color: #e6edf3; padding: 10px 16px;
+  flex: 1; background: #2d2d2d; border: none;
+  border-radius: 20px; color: #fff; padding: 10px 16px;
   font-size: 16px; font-family: inherit; resize: none;
-  min-height: 44px; max-height: 120px; line-height: 1.4;
+  min-height: 44px; max-height: 100px; line-height: 1.4;
 }
-#prompt:focus { outline: none; border-color: #58a6ff; }
-#prompt::placeholder { color: #484f58; }
+#prompt:focus { outline: none; }
+#prompt::placeholder { color: #666; }
 #send {
-  background: #238636; border: none; border-radius: 50%;
-  color: white; width: 44px; height: 44px; font-size: 18px;
-  cursor: pointer; flex-shrink: 0;
+  background: #007AFF; border: none; border-radius: 20px;
+  color: white; padding: 10px 20px; font-size: 16px; font-weight: 600;
+  cursor: pointer; flex-shrink: 0; min-width: 60px;
   display: flex; align-items: center; justify-content: center;
 }
-#send:active { background: #2ea043; }
-#send:disabled { background: #21262d; color: #484f58; }
+#send:active { background: #0066d6; }
+#send:disabled { background: #333; color: #666; }
 
 /* Markdown in agent messages */
-.msg.agent pre {
-  background: #0d1117; border: 1px solid #21262d;
+.msg.agent .md pre {
+  background: #1a1a2e; border: 1px solid #21262d;
   border-radius: 6px; padding: 10px; margin: 6px 0;
-  overflow-x: auto; font-size: 12px; line-height: 1.4;
+  overflow-x: auto; font-size: 13px; line-height: 1.4;
 }
-.msg.agent code {
-  font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+.msg.agent .md code {
+  font-family: "SF Mono", Menlo, monospace;
 }
-.msg.agent code:not(pre code) {
-  background: #1a1f2b; padding: 2px 5px; border-radius: 3px;
-  color: #f0883e; font-size: 12px;
+.msg.agent .md code:not(pre code) {
+  background: #1a1a2e; padding: 2px 5px; border-radius: 3px;
+  color: #e06c75; font-size: 13px;
 }
-.msg.agent strong { font-weight: 600; }
-.msg.agent em { font-style: italic; }
-.msg.agent a { color: #58a6ff; text-decoration: underline; }
-.msg.agent ul, .msg.agent ol {
+.msg.agent .md strong { font-weight: 700; }
+.msg.agent .md em { font-style: italic; }
+.msg.agent .md a { color: #007AFF; text-decoration: underline; }
+.msg.agent .md ul, .msg.agent .md ol {
   margin: 4px 0; padding-left: 20px;
 }
-.msg.agent li { margin: 2px 0; }
-.msg.agent h1, .msg.agent h2, .msg.agent h3 {
-  margin: 8px 0 4px 0; font-weight: 600;
+.msg.agent .md li { margin: 2px 0; }
+.msg.agent .md h1, .msg.agent .md h2, .msg.agent .md h3 {
+  margin: 8px 0 4px 0; font-weight: 600; color: #fff;
 }
-.msg.agent h1 { font-size: 18px; }
-.msg.agent h2 { font-size: 16px; }
-.msg.agent h3 { font-size: 15px; }
-.msg.agent blockquote {
-  border-left: 3px solid #30363d; padding-left: 12px;
-  color: #8b949e; margin: 6px 0;
+.msg.agent .md h1 { font-size: 18px; }
+.msg.agent .md h2 { font-size: 16px; }
+.msg.agent .md h3 { font-size: 15px; }
+.msg.agent .md blockquote {
+  border-left: 3px solid #007AFF; padding-left: 12px;
+  color: #8b949e; margin: 6px 0; background: #1a1a2e;
 }
-.msg.agent hr {
-  border: none; border-top: 1px solid #21262d; margin: 8px 0;
+.msg.agent .md hr {
+  border: none; border-top: 1px solid #333; margin: 8px 0;
 }
+.msg.agent .md p { margin: 4px 0; }
+.msg.agent .md { color: #fff; font-size: 15px; line-height: 22px; }
 </style>
 </head>
 <body>
 <div id="status">
   <span id="status-text">Connecting...</span>
-  <button class="cancel-btn" id="cancel-btn" onclick="cancelPrompt()">Cancel</button>
+  <button class="cancel-btn" id="cancel-btn" onclick="cancelPrompt()">Stop</button>
 </div>
 <div id="messages"></div>
-<div id="thinking"><div class="dots"><span>.</span><span>.</span><span>.</span></div><span class="label">Thinking</span></div>
-<button id="scroll-btn" onclick="scrollToBottom()">&#8595;</button>
+<div id="thinking"><div class="spinner"></div><span class="label">Agent is thinking...</span></div>
+<button id="scroll-btn" onclick="scrollToBottom()">&darr;</button>
 <div id="input-area">
-  <textarea id="prompt" rows="1" placeholder="Message..." enterkeyhint="send"></textarea>
-  <button id="send" disabled onclick="sendPrompt()">&#9652;</button>
+  <textarea id="prompt" rows="1" placeholder="Message the agent..." enterkeyhint="send"></textarea>
+  <button id="send" disabled onclick="sendPrompt()">Send</button>
 </div>
 
 <script>
@@ -206,22 +261,21 @@ let processing = false;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let isAtBottom = true;
+let msgIdCounter = 0;
 
 // --- Markdown renderer (basic, no dependencies) ---
 
 function renderMarkdown(text) {
-  // Escape HTML first
   let html = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Fenced code blocks (``` ... ```)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return '<pre><code>' + code.trimEnd() + '</code></pre>';
-  });
+  // Fenced code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    '<pre><code>' + code.trimEnd() + '</code></pre>');
 
-  // Inline code (`...`)
+  // Inline code
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
 
   // Headings
@@ -238,27 +292,19 @@ function renderMarkdown(text) {
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
   // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
   // Blockquotes
   html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
 
-  // Unordered lists (simple: lines starting with - or *)
+  // Unordered lists
   html = html.replace(/^(?:- |\* )(.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, (m) => '<ul>' + m + '</ul>');
 
-  // Ordered lists (lines starting with 1. 2. etc)
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-  // Wrap consecutive <li> not already in <ul> into <ol>
-  html = html.replace(/(?<!<\/ul>)(<li>.*<\/li>\n?)+/g, (match) => {
-    if (html.indexOf('<ul>' + match) === -1) return '<ol>' + match + '</ol>';
-    return match;
-  });
-
-  // Paragraphs: double newlines
+  // Paragraphs
   html = html.replace(/\n\n+/g, '</p><p>');
-  // Single newlines to <br> (but not inside pre/code)
-  html = html.replace(/(?<!<\/pre>|<\/code>|<\/h[123]>|<\/li>|<\/ul>|<\/ol>|<\/blockquote>|<\/hr>)\n(?!<pre|<h[123]|<li|<ul|<ol|<blockquote|<hr)/g, '<br>');
+  html = html.replace(/\n/g, '<br>');
 
   return '<p>' + html + '</p>';
 }
@@ -267,32 +313,97 @@ function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function shortPath(p) {
+  return p ? p.replace(/^\/Users\/[^/]+/, '~') : '';
+}
+
+function formatTime(d) {
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 // --- Message display ---
 
-function addMsg(cls, content) {
+function addUserMsg(text, status) {
   const d = document.createElement('div');
-  d.className = 'msg ' + cls;
-  if (cls === 'agent') {
-    d.innerHTML = renderMarkdown(content);
-  } else {
-    d.textContent = content;
-  }
+  d.className = 'msg user';
+  d.id = 'msg-' + (++msgIdCounter);
+  const time = formatTime(new Date());
+  const deliveryIcon = status === 'sending' ? '&#9675;' : '&#10003;';
+  d.innerHTML =
+    '<span class="role">You</span>' +
+    '<div class="text">' + escHtml(text) + '</div>' +
+    '<div class="meta"><span class="time">' + time + '</span>' +
+    '<span class="delivery">' + deliveryIcon + '</span></div>';
+  d.addEventListener('contextmenu', (e) => { e.preventDefault(); copyText(text); });
   messagesEl.appendChild(d);
   if (isAtBottom) scrollToBottom();
   return d;
 }
 
-function addToolMsg(toolName) {
+function markSent(el) {
+  const delivery = el.querySelector('.delivery');
+  if (delivery) delivery.innerHTML = '&#10003;';
+}
+
+function addAgentMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg agent';
+  d.id = 'msg-' + (++msgIdCounter);
+  d.innerHTML =
+    '<span class="role">Agent</span>' +
+    '<div class="md">' + renderMarkdown(text) + '</div>';
+  d._text = text;
+  d.addEventListener('contextmenu', (e) => { e.preventDefault(); copyText(d._text); });
+  messagesEl.appendChild(d);
+  if (isAtBottom) scrollToBottom();
+  return d;
+}
+
+function updateAgentMsg(el, text) {
+  el._text = text;
+  el.querySelector('.md').innerHTML = renderMarkdown(text);
+  if (isAtBottom) scrollToBottom();
+}
+
+function addToolMsg(toolName, params) {
   const d = document.createElement('div');
   d.className = 'msg tool';
+  d.id = 'msg-' + (++msgIdCounter);
+
+  // Detect file operations
+  const fileOps = { Read: true, Write: true, Edit: true,
+    mcp__acp__Read: true, mcp__acp__Write: true, mcp__acp__Edit: true,
+    Bash: true, Grep: true, Glob: true };
+  const isFileOp = fileOps[toolName];
+  const cleanName = toolName.replace('mcp__acp__', '');
+
+  // Pick icon based on tool type
+  let icon = '\u2699'; // gear
+  if (cleanName === 'Read') icon = '\uD83D\uDCD6';
+  else if (cleanName === 'Write') icon = '\uD83D\uDCDD';
+  else if (cleanName === 'Edit') icon = '\u270F\uFE0F';
+  else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
+  else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
+
+  // Extract file path from params if available
+  let filePath = '';
+  if (params) {
+    filePath = params.file_path || params.path || params.command || '';
+  }
+
+  let infoHtml = '<div class="tool-name">' + escHtml(cleanName) + '</div>';
+  if (filePath) {
+    infoHtml += '<div class="tool-path">' + escHtml(shortPath(filePath)) + '</div>';
+  }
+
   d.innerHTML =
     '<div class="tool-header">' +
-      '<span class="tool-icon">&#9881;</span>' +
-      '<span class="tool-name">' + escHtml(toolName) + '</span>' +
-      '<span class="tool-status running">running</span>' +
+      '<span class="tool-icon">' + icon + '</span>' +
+      '<div class="tool-info">' + infoHtml + '</div>' +
       '<span class="tool-expand">&#9656;</span>' +
     '</div>' +
-    '<div class="tool-body"></div>';
+    '<div class="tool-body"></div>' +
+    '<div class="tool-hint">tap to expand</div>';
   d.onclick = () => d.classList.toggle('expanded');
   messagesEl.appendChild(d);
   if (isAtBottom) scrollToBottom();
@@ -300,15 +411,47 @@ function addToolMsg(toolName) {
 }
 
 function updateToolStatus(toolEl, status, content) {
-  const statusEl = toolEl.querySelector('.tool-status');
-  if (statusEl) {
-    statusEl.textContent = status;
-    statusEl.className = 'tool-status ' + status;
+  const nameEl = toolEl.querySelector('.tool-name');
+  if (nameEl) {
+    nameEl.className = 'tool-name ' + status;
+    // Update icon
+    const iconEl = toolEl.querySelector('.tool-icon');
+    if (status === 'completed') {
+      iconEl.textContent = '\u2713';
+    } else if (status === 'failed') {
+      iconEl.textContent = '\u2717';
+    }
   }
   if (content) {
     const body = toolEl.querySelector('.tool-body');
     if (body) body.textContent = content;
+    const hint = toolEl.querySelector('.tool-hint');
+    if (hint) hint.textContent = 'tap to view content';
   }
+}
+
+function addSystemMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg system';
+  d.innerHTML = '<span class="text">' + escHtml(text) + '</span>';
+  messagesEl.appendChild(d);
+  if (isAtBottom) scrollToBottom();
+  return d;
+}
+
+function addErrorMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg error';
+  d.innerHTML =
+    '<span class="error-icon">\u26A0\uFE0F</span>' +
+    '<span class="text">' + escHtml(text) + '</span>';
+  messagesEl.appendChild(d);
+  if (isAtBottom) scrollToBottom();
+  return d;
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).catch(() => {});
 }
 
 function scrollToBottom() {
@@ -317,10 +460,9 @@ function scrollToBottom() {
   isAtBottom = true;
 }
 
-// Scroll tracking
 messagesEl.addEventListener('scroll', () => {
-  const distFromBottom = messagesEl.scrollHeight - messagesEl.clientHeight - messagesEl.scrollTop;
-  isAtBottom = distFromBottom < 60;
+  const dist = messagesEl.scrollHeight - messagesEl.clientHeight - messagesEl.scrollTop;
+  isAtBottom = dist < 60;
   scrollBtn.classList.toggle('visible', !isAtBottom);
 });
 
@@ -344,8 +486,7 @@ function connect() {
   };
 
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    handleMessage(msg);
+    handleMessage(JSON.parse(e.data));
   };
 
   ws.onclose = () => {
@@ -368,7 +509,6 @@ function scheduleReconnect() {
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    // Clear messages on reconnect -- replay will repopulate
     messagesEl.innerHTML = '';
     currentAgentMsg = null;
     sessionId = null;
@@ -377,30 +517,29 @@ function scheduleReconnect() {
 }
 
 function handleMessage(msg) {
-  // Response (has id + result/error)
+  // Response
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
     if (msg.error) {
-      addMsg('system', 'Error: ' + (msg.error.message || JSON.stringify(msg.error)));
+      addErrorMsg(msg.error.message || JSON.stringify(msg.error));
       setProcessing(false);
       return;
     }
 
-    // Initialize response
     if (msg.result && msg.result.agentInfo) {
       const info = msg.result.agentInfo;
-      addMsg('system', (info.name || 'Agent') + ' ' + (info.version || ''));
+      addSystemMsg((info.title || info.name || 'Agent') + ' ' + (info.version || ''));
     }
 
-    // Session/new response
     if (msg.result && msg.result.sessionId) {
       sessionId = msg.result.sessionId;
       sendBtn.disabled = false;
     }
 
-    // Prompt response (stopReason)
     if (msg.result && msg.result.stopReason) {
       currentAgentMsg = null;
       setProcessing(false);
+      // Mark last sent user message as delivered
+      if (lastSentMsg) { markSent(lastSentMsg); lastSentMsg = null; }
     }
     return;
   }
@@ -410,7 +549,6 @@ function handleMessage(msg) {
     const update = msg.params.update;
     if (!update) return;
 
-    // Extract sessionId from updates if we don't have it yet
     if (!sessionId && msg.params.sessionId) {
       sessionId = msg.params.sessionId;
       sendBtn.disabled = false;
@@ -422,35 +560,45 @@ function handleMessage(msg) {
     switch (kind) {
       case 'agent_message_chunk':
         if (!currentAgentMsg) {
-          currentAgentMsg = addMsg('agent', '');
-          currentAgentMsg._text = '';
+          currentAgentMsg = addAgentMsg('');
         }
         currentAgentMsg._text += text;
-        currentAgentMsg.innerHTML = renderMarkdown(currentAgentMsg._text);
-        if (isAtBottom) scrollToBottom();
+        updateAgentMsg(currentAgentMsg, currentAgentMsg._text);
         break;
 
-      case 'agent_thought_chunk':
-        addMsg('thought', text);
+      case 'agent_thought_chunk': {
+        const d = document.createElement('div');
+        d.className = 'msg thought';
+        d.textContent = text;
+        messagesEl.appendChild(d);
+        if (isAtBottom) scrollToBottom();
         break;
+      }
 
       case 'tool_call':
         currentAgentMsg = null;
-        const toolEl = addToolMsg(update.toolName || '?');
-        // Store reference for updates
-        messagesEl._lastTool = toolEl;
+        messagesEl._lastTool = addToolMsg(
+          update.toolName || '?',
+          update.params || update.input || null
+        );
         break;
 
       case 'tool_call_update':
         if (messagesEl._lastTool) {
-          const status = update.status || 'completed';
-          updateToolStatus(messagesEl._lastTool, status, update.content ? JSON.stringify(update.content, null, 2) : '');
+          const st = update.status || 'completed';
+          let content = '';
+          if (update.content) {
+            content = typeof update.content === 'string'
+              ? update.content
+              : JSON.stringify(update.content, null, 2);
+          }
+          updateToolStatus(messagesEl._lastTool, st, content);
         }
         break;
 
       case 'user_message_chunk':
         currentAgentMsg = null;
-        if (text) addMsg('user', text);
+        if (text) addUserMsg(text, 'sent');
         break;
 
       case 'available_commands_update':
@@ -461,20 +609,22 @@ function handleMessage(msg) {
     return;
   }
 
-  // Reverse call from agent (secondary frontends normally don't get these)
+  // Reverse call from agent
   if (msg.method && msg.id !== undefined) {
-    addMsg('system', '[agent: ' + escHtml(msg.method) + ']');
+    addSystemMsg('agent: ' + msg.method);
   }
 }
 
 // --- User interaction ---
+
+let lastSentMsg = null;
 
 function sendPrompt() {
   const text = promptEl.value.trim();
   if (!text || !sessionId) return;
 
   currentAgentMsg = null;
-  addMsg('user', text);
+  lastSentMsg = addUserMsg(text, 'sending');
   promptEl.value = '';
   promptEl.style.height = 'auto';
   setProcessing(true);
@@ -495,10 +645,9 @@ function cancelPrompt() {
     params: { sessionId }
   }));
   setProcessing(false);
-  addMsg('system', 'Cancelled');
+  addSystemMsg('Cancelled');
 }
 
-// Enter to send, Shift+Enter for newline
 promptEl.onkeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -506,7 +655,6 @@ promptEl.onkeydown = (e) => {
   }
 };
 
-// Auto-grow textarea
 promptEl.oninput = () => {
   promptEl.style.height = 'auto';
   promptEl.style.height = Math.min(promptEl.scrollHeight, 120) + 'px';
