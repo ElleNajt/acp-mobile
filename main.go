@@ -544,7 +544,7 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 					info.Project = filepath.Base(info.Cwd)
 				}
 
-				if gotSessionID && gotTitle {
+				if gotSessionID && gotTitle && info.BufferName != "" {
 					return info
 				}
 			}
