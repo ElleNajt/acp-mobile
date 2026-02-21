@@ -669,6 +669,103 @@ func processCwd(pid int) string {
 	return ""
 }
 
+// --- Reverse call handlers ---
+
+// handleReverseCall checks if a JSON line from the socket is a reverse call
+// (fs/read_text_file, fs/write_text_file) that we can handle locally.
+// Returns the JSON-RPC response to send back, or nil if not a handled method.
+func handleReverseCall(line []byte) []byte {
+	var env struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(line, &env) != nil || env.Method == "" || env.ID == nil {
+		return nil
+	}
+
+	switch env.Method {
+	case "fs/read_text_file":
+		return handleFsRead(env.ID, env.Params)
+	case "fs/write_text_file":
+		return handleFsWrite(env.ID, env.Params)
+	default:
+		return nil
+	}
+}
+
+func handleFsRead(id json.RawMessage, params json.RawMessage) []byte {
+	var p struct {
+		Path  string `json:"path"`
+		Line  *int   `json:"line"`
+		Limit *int   `json:"limit"`
+	}
+	if json.Unmarshal(params, &p) != nil || p.Path == "" {
+		return jsonRPCError(id, -32602, "invalid params")
+	}
+
+	data, err := os.ReadFile(p.Path)
+	if err != nil {
+		return jsonRPCError(id, -32000, err.Error())
+	}
+
+	content := string(data)
+
+	// Handle line/limit offset (1-based line numbers)
+	if p.Line != nil || p.Limit != nil {
+		lines := strings.Split(content, "\n")
+		start := 0
+		if p.Line != nil && *p.Line > 1 {
+			start = *p.Line - 1
+		}
+		if start > len(lines) {
+			start = len(lines)
+		}
+		lines = lines[start:]
+		if p.Limit != nil && *p.Limit < len(lines) {
+			lines = lines[:*p.Limit]
+		}
+		content = strings.Join(lines, "\n")
+	}
+
+	resp, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  map[string]string{"content": content},
+	})
+	return resp
+}
+
+func handleFsWrite(id json.RawMessage, params json.RawMessage) []byte {
+	var p struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(params, &p) != nil || p.Path == "" {
+		return jsonRPCError(id, -32602, "invalid params")
+	}
+
+	if err := os.WriteFile(p.Path, []byte(p.Content), 0644); err != nil {
+		return jsonRPCError(id, -32000, err.Error())
+	}
+
+	resp, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  map[string]interface{}{},
+	})
+	return resp
+}
+
+func jsonRPCError(id json.RawMessage, code int, message string) []byte {
+	resp, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error":   map[string]interface{}{"code": code, "message": message},
+	})
+	return resp
+}
+
 // --- WebSocket bridge ---
 
 // bridgeWebSocket connects to the proxy socket and bridges to the browser.
@@ -759,6 +856,16 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 
 	func() {
 		defer once.Do(closeAll)
+		// forwardOrHandle checks if a line is a reverse call we handle locally.
+		// If so, sends the response back to the socket. Otherwise forwards to browser.
+		forwardOrHandle := func(line []byte) {
+			if resp := handleReverseCall(line); resp != nil {
+				conn.Write(resp)
+				conn.Write([]byte("\n"))
+				return
+			}
+			websocket.Message.Send(ws, string(line))
+		}
 		// Flush leftover bytes from replay read
 		for {
 			nl := bytes.IndexByte(buf, '\n')
@@ -766,7 +873,7 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 				break
 			}
 			if nl > 0 {
-				websocket.Message.Send(ws, string(buf[:nl]))
+				forwardOrHandle(buf[:nl])
 			}
 			buf = buf[nl+1:]
 		}
@@ -785,7 +892,7 @@ func bridgeWebSocket(ws *websocket.Conn, sockPath string) {
 					break
 				}
 				if nl > 0 {
-					websocket.Message.Send(ws, string(buf[:nl]))
+					forwardOrHandle(buf[:nl])
 				}
 				buf = buf[nl+1:]
 			}
