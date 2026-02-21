@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -89,6 +90,39 @@ func loadOrCreateAuthKey() string {
 	return key
 }
 
+// Auth rate limiter: tracks failed attempts per IP
+type rateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{attempts: make(map[string][]time.Time)}
+}
+
+// check returns true if the IP is rate-limited (too many recent failures).
+func (rl *rateLimiter) check(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	window := time.Now().Add(-15 * time.Minute)
+	attempts := rl.attempts[ip]
+	// Prune old entries
+	valid := attempts[:0]
+	for _, t := range attempts {
+		if t.After(window) {
+			valid = append(valid, t)
+		}
+	}
+	rl.attempts[ip] = valid
+	return len(valid) >= 10 // 10 failures in 15 min = locked out
+}
+
+func (rl *rateLimiter) record(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
+}
+
 func main() {
 	port := "8090"
 	if len(os.Args) > 1 {
@@ -96,6 +130,7 @@ func main() {
 	}
 
 	authKey := loadOrCreateAuthKey()
+	authRL := newRateLimiter()
 
 	mux := http.NewServeMux()
 
@@ -104,10 +139,18 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
+		// Generate per-request CSP nonce
+		nonceBytes := make([]byte, 16)
+		rand.Read(nonceBytes)
+		nonce := base64.StdEncoding.EncodeToString(nonceBytes)
+
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy",
+			fmt.Sprintf("default-src 'self'; script-src 'nonce-%s'; style-src 'unsafe-inline'; frame-ancestors 'none'", nonce))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(indexHTML)
+		w.Write(bytes.Replace(indexHTML, []byte("__CSP_NONCE__"), []byte(nonce), 1))
 	})
 
 	mux.Handle("/ws", &websocket.Server{
@@ -179,9 +222,20 @@ func main() {
 			return
 		}
 
+		// Extract client IP for rate limiting
+		clientIP := r.RemoteAddr
+		if h, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = h
+		}
+
 		// Auth: if authkey query param is present and valid, set cookie and redirect
 		if qk := r.URL.Query().Get("authkey"); qk != "" {
+			if authRL.check(clientIP) {
+				http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+				return
+			}
 			if subtle.ConstantTimeCompare([]byte(qk), []byte(authKey)) != 1 {
+				authRL.record(clientIP)
 				http.Error(w, "invalid authkey", http.StatusForbidden)
 				return
 			}
@@ -203,6 +257,11 @@ func main() {
 		// Auth: check cookie
 		cookie, err := r.Cookie("authkey")
 		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(authKey)) != 1 {
+			if authRL.check(clientIP) {
+				http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+				return
+			}
+			authRL.record(clientIP)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -221,14 +280,31 @@ func main() {
 
 	wrapped := cop.Handler(handler)
 
+	// Limit request body size (1MB)
+	limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		wrapped.ServeHTTP(w, r)
+	})
+
+	// Note: no ReadTimeout/WriteTimeout on the server because they kill
+	// long-lived WebSocket connections. Body size limit above handles
+	// the request size concern; idle timeout handles connection cleanup.
+	makeServer := func(addr string) *http.Server {
+		return &http.Server{
+			Addr:        addr,
+			Handler:     limited,
+			IdleTimeout: 120 * time.Second,
+		}
+	}
+
 	// Listen on localhost
 	go func() {
-		log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%s", port), wrapped))
+		log.Fatal(makeServer(fmt.Sprintf("127.0.0.1:%s", port)).ListenAndServe())
 	}()
 	// Listen on Tailscale IP if available
 	if tsErr == nil && ts.IP != "" {
 		log.Printf("acp-mobile: also listening on %s:%s", ts.IP, port)
-		log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%s", ts.IP, port), wrapped))
+		log.Fatal(makeServer(fmt.Sprintf("%s:%s", ts.IP, port)).ListenAndServe())
 	} else {
 		select {}
 	}
