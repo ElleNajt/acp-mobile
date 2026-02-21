@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
@@ -420,6 +421,9 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 		ok   bool
 	}
 
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
 	var wg sync.WaitGroup
 	results := make([]result, len(socks))
 
@@ -429,9 +433,23 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			info := probeSocket(sock.path, sock.pid)
-			info.LastActivity = sock.mtime
-			results[idx] = result{info: info, ok: true}
+			done := make(chan struct{})
+			var info sessionInfo
+			go func() {
+				info = probeSocket(sock.path, sock.pid)
+				close(done)
+			}()
+			select {
+			case <-done:
+				info.LastActivity = sock.mtime
+				results[idx] = result{info: info, ok: true}
+			case <-ctx.Done():
+				// Timed out — return partial info
+				results[idx] = result{
+					info: sessionInfo{Pid: sock.pid, LastActivity: sock.mtime},
+					ok:   true,
+				}
+			}
 		}()
 	}
 	wg.Wait()
@@ -537,12 +555,12 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 		info.Project = filepath.Base(info.Cwd)
 	}
 
-	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
 	if err != nil {
 		return info
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 
 	// Read raw bytes instead of scanning lines — much faster for large replays.
 	// We only need the first ~2 response messages (initialize + session/new).
