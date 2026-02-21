@@ -277,15 +277,14 @@ body {
 .msg.tool .tool-info { flex: 1; min-width: 0; }
 .msg.tool .tool-name {
   font-family: "SF Mono", Menlo, monospace; font-size: 13px;
-  color: #ccc; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap;
+  color: #ccc; word-break: break-word;
 }
 .msg.tool .tool-name.completed { color: #4CAF50; }
 .msg.tool .tool-name.failed { color: #F44336; }
 .msg.tool .tool-path {
   font-family: "SF Mono", Menlo, monospace; font-size: 11px;
-  color: #888; margin-top: 2px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
+  color: #888; margin-top: 2px;
+  word-break: break-all;
 }
 .msg.tool .tool-expand { color: #666; font-size: 10px; margin-left: 8px; }
 .msg.tool .tool-body {
@@ -702,15 +701,17 @@ function addToolMsg(toolName, params) {
   else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
   else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
 
-  // Extract file path from params if available
-  let filePath = '';
+  // Extract subtitle (path/command) and description from params
+  let subtitle = '';
+  let titleText = cleanName;
   if (params) {
-    filePath = params.file_path || params.path || params.command || '';
+    subtitle = params.file_path || params.path || params.command || '';
+    if (params.description) titleText = params.description;
   }
 
-  let infoHtml = '<div class="tool-name">' + escHtml(cleanName) + '</div>';
-  if (filePath) {
-    infoHtml += '<div class="tool-path">' + escHtml(shortPath(filePath)) + '</div>';
+  let infoHtml = '<div class="tool-name">' + escHtml(titleText) + '</div>';
+  if (subtitle) {
+    infoHtml += '<div class="tool-path">' + escHtml(shortPath(subtitle)) + '</div>';
   }
 
   // Pre-populate tool body with input details for Edit/Write
@@ -722,6 +723,15 @@ function addToolMsg(toolName, params) {
       ? params.content.slice(0, 2000) + '\n... (truncated)'
       : params.content;
     bodyHtml = escHtml(preview);
+  } else if (params) {
+    // Show params summary for other tools (Grep pattern, Bash command, etc.)
+    const parts = [];
+    for (const [k, v] of Object.entries(params)) {
+      if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue; // already in title/subtitle
+      const s = typeof v === 'string' ? v : JSON.stringify(v);
+      if (s.length < 200) parts.push(k + ': ' + s);
+    }
+    if (parts.length) bodyHtml = escHtml(parts.join('\n'));
   }
 
   d.innerHTML =
@@ -736,6 +746,59 @@ function addToolMsg(toolName, params) {
   messagesEl.appendChild(d);
   if (isAtBottom) scrollToBottom();
   return d;
+}
+
+function updateToolInfo(toolEl, name, params) {
+  const cleanName = name.replace('mcp__acp__', '');
+  const nameEl = toolEl.querySelector('.tool-name');
+  let titleText = cleanName;
+  if (params && params.description) titleText = params.description;
+  if (nameEl) nameEl.textContent = titleText;
+
+  let subtitle = '';
+  if (params) subtitle = params.file_path || params.path || params.command || '';
+  const pathEl = toolEl.querySelector('.tool-path');
+  if (subtitle) {
+    if (pathEl) {
+      pathEl.textContent = shortPath(subtitle);
+    } else {
+      const infoEl = toolEl.querySelector('.tool-info');
+      if (infoEl) {
+        const p = document.createElement('div');
+        p.className = 'tool-path';
+        p.textContent = shortPath(subtitle);
+        infoEl.appendChild(p);
+      }
+    }
+  }
+
+  // Update body with input details
+  const body = toolEl.querySelector('.tool-body');
+  if (body && !body.innerHTML.trim()) {
+    let bodyHtml = '';
+    if (params && cleanName === 'Edit' && params.old_string) {
+      bodyHtml = renderDiff(params.old_string, params.new_string || '');
+    } else if (params && cleanName === 'Write' && params.content) {
+      const preview = params.content.length > 2000
+        ? params.content.slice(0, 2000) + '\n... (truncated)'
+        : params.content;
+      bodyHtml = escHtml(preview);
+    } else if (params) {
+      // Show params summary for other tools
+      const parts = [];
+      for (const [k, v] of Object.entries(params)) {
+        if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue;
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        if (s.length < 200) parts.push(k + ': ' + s);
+      }
+      if (parts.length) bodyHtml = escHtml(parts.join('\n'));
+    }
+    if (bodyHtml) {
+      body.innerHTML = bodyHtml;
+      const hint = toolEl.querySelector('.tool-hint');
+      if (hint) hint.textContent = 'tap to view details';
+    }
+  }
 }
 
 function updateToolStatus(toolEl, status, content) {
@@ -753,13 +816,21 @@ function updateToolStatus(toolEl, status, content) {
   const body = toolEl.querySelector('.tool-body');
   const hint = toolEl.querySelector('.tool-hint');
   if (content) {
-    // Only replace body if it was empty (preserve pre-populated diffs)
-    if (body && !body.innerHTML.trim()) {
-      body.textContent = content;
+    if (body) {
+      if (body.innerHTML.trim()) {
+        // Body has input params - add separator and append result
+        const sep = document.createElement('hr');
+        sep.style.cssText = 'border:none;border-top:1px solid #333;margin:8px 0';
+        body.appendChild(sep);
+        const out = document.createElement('div');
+        out.textContent = content;
+        body.appendChild(out);
+      } else {
+        body.textContent = content;
+      }
     }
     if (hint) hint.textContent = 'tap to view details';
   } else if (body && body.innerHTML.trim()) {
-    // Already has content from input params (diff/write preview)
     if (hint) hint.textContent = 'tap to view details';
   }
 }
@@ -995,7 +1066,12 @@ function toolName(update) {
 }
 
 function toolOutputText(update) {
-  if (update.rawOutput) return update.rawOutput;
+  if (update.rawOutput) {
+    if (Array.isArray(update.rawOutput)) {
+      return update.rawOutput.map(c => (c && c.text) || '').filter(Boolean).join('\n');
+    }
+    if (typeof update.rawOutput === 'string') return update.rawOutput;
+  }
   if (Array.isArray(update.content)) {
     for (const c of update.content) {
       const inner = c.content || c;
@@ -1085,14 +1161,16 @@ function addToolMsgTo(parent, toolName, params) {
   else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
   else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
 
-  let filePath = '';
+  let subtitle = '';
+  let titleText = cleanName;
   if (params) {
-    filePath = params.file_path || params.path || params.command || '';
+    subtitle = params.file_path || params.path || params.command || '';
+    if (params.description) titleText = params.description;
   }
 
-  let infoHtml = '<div class="tool-name completed">' + escHtml(cleanName) + '</div>';
-  if (filePath) {
-    infoHtml += '<div class="tool-path">' + escHtml(shortPath(filePath)) + '</div>';
+  let infoHtml = '<div class="tool-name completed">' + escHtml(titleText) + '</div>';
+  if (subtitle) {
+    infoHtml += '<div class="tool-path">' + escHtml(shortPath(subtitle)) + '</div>';
   }
 
   let bodyHtml = '';
@@ -1103,6 +1181,14 @@ function addToolMsgTo(parent, toolName, params) {
       ? params.content.slice(0, 2000) + '\n... (truncated)'
       : params.content;
     bodyHtml = escHtml(preview);
+  } else if (params) {
+    const parts = [];
+    for (const [k, v] of Object.entries(params)) {
+      if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue;
+      const s = typeof v === 'string' ? v : JSON.stringify(v);
+      if (s.length < 200) parts.push(k + ': ' + s);
+    }
+    if (parts.length) bodyHtml = escHtml(parts.join('\n'));
   }
 
   d.innerHTML =
@@ -1241,14 +1327,29 @@ function flushReplay() {
       case 'agent_message_chunk':
         pendingText += text;
         break;
-      case 'tool_call':
-        // Flush pending agent text
-        if (pendingText) {
-          turns.push({type: 'agent', text: pendingText});
-          pendingText = '';
+      case 'tool_call': {
+        const tcId = update.toolCallId;
+        // Check if we already have a turn for this toolCallId — update it instead of adding duplicate
+        let found = false;
+        if (tcId) {
+          for (let j = turns.length - 1; j >= 0; j--) {
+            if (turns[j].type === 'tool' && turns[j].toolCallId === tcId) {
+              turns[j].toolName = toolName(update);
+              turns[j].toolParams = update.rawInput || null;
+              found = true;
+              break;
+            }
+          }
         }
-        turns.push({type: 'tool', toolName: toolName(update), toolParams: update.rawInput || null});
+        if (!found) {
+          if (pendingText) {
+            turns.push({type: 'agent', text: pendingText});
+            pendingText = '';
+          }
+          turns.push({type: 'tool', toolCallId: tcId, toolName: toolName(update), toolParams: update.rawInput || null});
+        }
         break;
+      }
       case 'tool_call_update':
         turns.push({type: 'tool_update', toolStatus: update.status || 'completed', toolContent: toolOutputText(update)});
         break;
@@ -1395,20 +1496,34 @@ function handleMessage(msg) {
         break;
       }
 
-      case 'tool_call':
+      case 'tool_call': {
         currentAgentMsg = null;
         setProcessing(true);
-        messagesEl._lastTool = addToolMsg(
-          toolName(update),
-          update.rawInput || null
-        );
-        break;
-
-      case 'tool_call_update':
-        if (messagesEl._lastTool) {
-          updateToolStatus(messagesEl._lastTool, update.status || 'completed', toolOutputText(update));
+        const tcId = update.toolCallId;
+        // If we already have an element for this toolCallId, update it in place
+        const existing = tcId && messagesEl._toolCalls && messagesEl._toolCalls[tcId];
+        if (existing) {
+          updateToolInfo(existing, toolName(update), update.rawInput || null);
+          messagesEl._lastTool = existing;
+        } else {
+          const el = addToolMsg(toolName(update), update.rawInput || null);
+          messagesEl._lastTool = el;
+          if (tcId) {
+            if (!messagesEl._toolCalls) messagesEl._toolCalls = {};
+            messagesEl._toolCalls[tcId] = el;
+          }
         }
         break;
+      }
+
+      case 'tool_call_update': {
+        const tcuId = update.toolCallId;
+        const toolEl = (tcuId && messagesEl._toolCalls && messagesEl._toolCalls[tcuId]) || messagesEl._lastTool;
+        if (toolEl) {
+          updateToolStatus(toolEl, update.status || 'completed', toolOutputText(update));
+        }
+        break;
+      }
 
       case 'user_message_chunk':
         currentAgentMsg = null;
