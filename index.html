@@ -409,50 +409,50 @@ body {
 <div id="navigator">
   <div id="nav-header">
     <span class="nav-title">Sessions</span>
-    <button class="nav-btn" id="sort-btn" onclick="toggleSort()">Recent</button>
-    <button class="nav-btn" onclick="spawnAgent()">+</button>
-    <button class="nav-btn" onclick="loadSessions()">&#8635;</button>
+    <button class="nav-btn" id="sort-btn">Recent</button>
+    <button class="nav-btn" id="spawn-btn">+</button>
+    <button class="nav-btn" id="refresh-btn">&#8635;</button>
   </div>
   <div id="nav-list"></div>
 </div>
 <div id="chat-view">
 <div id="header">
-  <button class="back-btn" id="back-btn" onclick="navigateBack()">&larr;</button>
+  <button class="back-btn" id="back-btn">&larr;</button>
   <div class="header-info">
     <div class="header-title" id="header-title">ACP</div>
     <div class="header-sub">
       <span class="header-status" id="status-text">Connecting...</span>
-      <button class="mode-btn" id="mode-btn" onclick="cycleMode()" style="display:none">Ask</button>
+      <button class="mode-btn" id="mode-btn" style="display:none">Ask</button>
     </div>
   </div>
   <div class="header-actions">
-    <button class="files-btn" id="files-btn" onclick="openFileBrowser()">Files</button>
-    <button class="files-btn" id="kill-btn" onclick="killSession()" style="color:#F44336;border-color:#F44336;display:none">Kill</button>
+    <button class="files-btn" id="files-btn">Files</button>
+    <button class="files-btn" id="kill-btn" style="color:#F44336;border-color:#F44336;display:none">Kill</button>
   </div>
 </div>
 <div id="file-browser">
   <div id="fb-header">
-    <button class="fb-back" id="fb-back" onclick="fbNavigateUp()">&larr;</button>
+    <button class="fb-back" id="fb-back">&larr;</button>
     <span class="fb-path" id="fb-path"></span>
-    <button class="fb-hidden-toggle" id="fb-hidden-toggle" onclick="fbToggleHidden()">.*</button>
-    <button class="fb-close" onclick="closeFileBrowser()">&times;</button>
+    <button class="fb-hidden-toggle" id="fb-hidden-toggle">.*</button>
+    <button class="fb-close" id="fb-close">&times;</button>
   </div>
   <div id="fb-list"></div>
 </div>
 <div id="fb-viewer">
   <div id="fbv-header">
-    <button class="fbv-back" onclick="closeFileViewer()">&larr;</button>
+    <button class="fbv-back" id="fbv-back">&larr;</button>
     <span class="fbv-path" id="fbv-path"></span>
   </div>
   <div id="fbv-content"></div>
 </div>
 <div id="messages"></div>
 <div id="thinking"><div class="spinner"></div><span class="label">Agent is thinking...</span></div>
-<button id="scroll-btn" onclick="scrollToBottom()">&darr;</button>
+<button id="scroll-btn">&darr;</button>
 <div id="input-area">
   <textarea id="prompt" rows="1" placeholder="Message the agent..." enterkeyhint="send"></textarea>
-  <button id="send" disabled onclick="sendPrompt()">Send</button>
-  <button id="stop-btn" onclick="cancelPrompt()">Stop</button>
+  <button id="send" disabled>Send</button>
+  <button id="stop-btn">Stop</button>
 </div>
 </div><!-- /chat-view -->
 
@@ -1739,6 +1739,22 @@ async function killSessionByName(bufferName) {
     setTimeout(loadSessions, 500);
   } catch (err) { alert('Kill failed: ' + err.message); }
 }
+
+// Wire up event listeners (no inline onclick for CSP compatibility)
+document.getElementById('sort-btn').addEventListener('click', toggleSort);
+document.getElementById('spawn-btn').addEventListener('click', spawnAgent);
+document.getElementById('refresh-btn').addEventListener('click', loadSessions);
+document.getElementById('back-btn').addEventListener('click', navigateBack);
+document.getElementById('mode-btn').addEventListener('click', cycleMode);
+document.getElementById('files-btn').addEventListener('click', openFileBrowser);
+document.getElementById('kill-btn').addEventListener('click', killSession);
+document.getElementById('fb-back').addEventListener('click', fbNavigateUp);
+document.getElementById('fb-hidden-toggle').addEventListener('click', fbToggleHidden);
+document.getElementById('fb-close').addEventListener('click', closeFileBrowser);
+document.getElementById('fbv-back').addEventListener('click', closeFileViewer);
+document.getElementById('scroll-btn').addEventListener('click', scrollToBottom);
+document.getElementById('send').addEventListener('click', sendPrompt);
+document.getElementById('stop-btn').addEventListener('click', cancelPrompt);
 
 // Start: try loading sessions (discover mode), fall back to direct connect
 loadSessions();
