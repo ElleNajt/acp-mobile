@@ -634,6 +634,11 @@ func probeSocket(sockPath string, pid int) sessionInfo {
 }
 
 func processCwd(pid int) string {
+	// Try /proc/<pid>/cwd first (Linux)
+	if target, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err == nil {
+		return target
+	}
+	// Fall back to lsof (macOS)
 	out, err := exec.Command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output()
 	if err != nil {
 		return ""
