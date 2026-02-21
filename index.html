@@ -1668,8 +1668,7 @@ async function spawnAgent() {
       alert('Spawn failed: ' + data.error);
       return;
     }
-    // Refresh after a short delay to let the session start
-    setTimeout(loadSessions, 2000);
+    pollForNewSession();
   } catch (err) {
     alert('Spawn failed: ' + err.message);
   }
@@ -1711,8 +1710,20 @@ async function spawnInProject(cwd) {
     });
     const data = await resp.json();
     if (data.error) { alert('Spawn failed: ' + data.error); return; }
-    setTimeout(loadSessions, 2000);
+    pollForNewSession();
   } catch (err) { alert('Spawn failed: ' + err.message); }
+}
+
+function pollForNewSession() {
+  const before = lastSessions.length;
+  let attempts = 0;
+  const poll = () => {
+    if (attempts++ > 10) return;
+    loadSessions().then(() => {
+      if (lastSessions.length <= before) setTimeout(poll, 1000);
+    });
+  };
+  setTimeout(poll, 1000);
 }
 
 async function killSessionByName(bufferName) {
