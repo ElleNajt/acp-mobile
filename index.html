@@ -301,6 +301,62 @@ body {
 }
 .msg.tool.expanded .tool-hint { display: none; }
 
+/* Permission request cards */
+.msg.permission {
+  background: #1a1a2e; border-left: 3px solid #FF9800;
+  border-radius: 8px; padding: 12px; max-width: 100%;
+  font-size: 13px;
+}
+.msg.permission .perm-header {
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.msg.permission .perm-icon { font-size: 14px; flex-shrink: 0; }
+.msg.permission .perm-info { flex: 1; min-width: 0; }
+.msg.permission .perm-title {
+  font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+  color: #FF9800; font-weight: 600;
+}
+.msg.permission .perm-path {
+  font-family: "SF Mono", Menlo, monospace; font-size: 11px;
+  color: #888; margin-top: 2px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.msg.permission .perm-detail {
+  margin-top: 8px; padding: 8px; background: #0d0d1a;
+  border-radius: 6px; font-family: "SF Mono", Menlo, monospace;
+  font-size: 11px; color: #e0e0e0; white-space: pre-wrap;
+  max-height: 200px; overflow-y: auto; line-height: 16px;
+}
+.msg.permission .perm-options {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+}
+.msg.permission .perm-btn {
+  border: none; border-radius: 8px; padding: 8px 14px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.msg.permission .perm-btn:active { opacity: 0.7; }
+.msg.permission .perm-btn.allow {
+  background: #238636; color: #fff;
+}
+.msg.permission .perm-btn.allow-always {
+  background: #1a5a2e; color: #aaf0b8;
+}
+.msg.permission .perm-btn.reject {
+  background: #8b2020; color: #fff;
+}
+.msg.permission .perm-btn.reject-always {
+  background: #5a1a1a; color: #f0aaaa;
+}
+.msg.permission .perm-btn:disabled {
+  opacity: 0.3; cursor: default;
+}
+.msg.permission .perm-btn.selected {
+  opacity: 1; outline: 2px solid #fff; outline-offset: 1px;
+}
+.msg.permission.resolved .perm-title { color: #888; }
+.msg.permission.resolved { border-left-color: #555; }
+
 /* Diff rendering in tool bodies */
 .msg.tool .diff-header { color: #888; font-weight: 600; }
 .msg.tool .diff-removed {
@@ -485,6 +541,9 @@ let projectCwd = null;
 let currentSockPid = null;
 let currentBufferName = null;
 
+// Permission state
+let pendingPermissions = []; // [{id, element}]
+
 // Mode state
 let currentMode = 'default';
 let availableModes = [];
@@ -493,14 +552,20 @@ let replayBuffer = [];
 let replayTimer = null;
 let allReplayTurns = [];  // Full history from replay
 let renderedTurnStart = 0; // Index into allReplayTurns of first rendered turn
-const MODE_LABELS = {
-  default: 'Ask', acceptEdits: 'Edits', plan: 'Plan',
-  dontAsk: "Don't Ask", bypassPermissions: 'YOLO'
-};
-const MODE_COLORS = {
-  default: '#888', acceptEdits: '#4CAF50', plan: '#FF9800',
-  dontAsk: '#2196F3', bypassPermissions: '#F44336'
-};
+// Mode display: look up name from availableModes, fall back to id
+function modeName(id) {
+  const mode = availableModes.find(m => m.id === id);
+  return mode ? mode.name : id;
+}
+function modeColor(id) {
+  // Heuristic coloring based on common mode semantics
+  const lower = id.toLowerCase();
+  if (lower.includes('yolo') || lower.includes('bypass')) return '#F44336';
+  if (lower.includes('plan') || lower.includes('architect')) return '#FF9800';
+  if (lower.includes('edit') || lower.includes('code') || lower.includes('auto')) return '#4CAF50';
+  if (lower.includes('dont') || lower.includes("don't")) return '#2196F3';
+  return '#888';
+}
 
 // --- Markdown renderer (basic, no dependencies) ---
 
@@ -719,6 +784,98 @@ function addErrorMsg(text) {
   return d;
 }
 
+function addPermissionMsg(msg, interactive) {
+  const params = msg.params || {};
+  const tc = params.toolCall || {};
+  const options = params.options || [];
+
+  const d = document.createElement('div');
+  d.className = 'msg permission' + (interactive ? '' : ' resolved');
+  d.id = 'msg-' + (++msgIdCounter);
+
+  // Icon based on tool kind
+  const KIND_ICONS = {
+    read: '\uD83D\uDCD6', edit: '\u270F\uFE0F', delete: '\uD83D\uDDD1',
+    execute: '\uD83D\uDCBB', search: '\uD83D\uDD0D', fetch: '\uD83C\uDF10'
+  };
+  const icon = KIND_ICONS[tc.kind] || '\uD83D\uDD12';
+
+  // Extract path from content or locations
+  let filePath = '';
+  if (tc.content && tc.content.length > 0) {
+    filePath = tc.content[0].path || '';
+  }
+  if (!filePath && tc.locations && tc.locations.length > 0) {
+    filePath = tc.locations[0].path || '';
+  }
+
+  let headerHtml =
+    '<div class="perm-header">' +
+      '<span class="perm-icon">' + icon + '</span>' +
+      '<div class="perm-info">' +
+        '<div class="perm-title">' + escHtml(tc.title || 'Permission required') + '</div>' +
+        (filePath ? '<div class="perm-path">' + escHtml(shortPath(filePath)) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+
+  // Detail: show diff or text content
+  let detailHtml = '';
+  if (tc.content && tc.content.length > 0) {
+    const c = tc.content[0];
+    if (c.type === 'diff' && c.oldText !== undefined) {
+      detailHtml = '<div class="perm-detail">' + renderDiff(c.oldText, c.newText || '') + '</div>';
+    } else if (c.type === 'text' && c.text) {
+      const preview = c.text.length > 1000 ? c.text.slice(0, 1000) + '\n... (truncated)' : c.text;
+      detailHtml = '<div class="perm-detail">' + escHtml(preview) + '</div>';
+    } else if (c.type === 'terminal' && c.command) {
+      detailHtml = '<div class="perm-detail">$ ' + escHtml(c.command) + '</div>';
+    }
+  }
+
+  // Option buttons
+  let optionsHtml = '';
+  if (interactive && options.length > 0) {
+    optionsHtml = '<div class="perm-options">';
+    for (const opt of options) {
+      let cls = 'perm-btn';
+      if (opt.kind === 'allow_once') cls += ' allow';
+      else if (opt.kind === 'allow_always') cls += ' allow-always';
+      else if (opt.kind === 'reject_once') cls += ' reject';
+      else if (opt.kind === 'reject_always') cls += ' reject-always';
+      optionsHtml += '<button class="' + cls + '" data-option-id="' + escHtml(opt.optionId) + '">' +
+        escHtml(opt.name) + '</button>';
+    }
+    optionsHtml += '</div>';
+  }
+
+  d.innerHTML = headerHtml + detailHtml + optionsHtml;
+
+  if (interactive) {
+    const buttons = d.querySelectorAll('.perm-btn');
+    buttons.forEach(btn => {
+      btn.onclick = () => {
+        const optionId = btn.getAttribute('data-option-id');
+        // Send response
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0', id: msg.id,
+          result: { outcome: { outcome: 'selected', optionId: optionId } }
+        }));
+        // Disable all buttons, highlight selected
+        buttons.forEach(b => { b.disabled = true; });
+        btn.classList.add('selected');
+        d.classList.add('resolved');
+        // Remove from pending
+        pendingPermissions = pendingPermissions.filter(p => p.id !== msg.id);
+      };
+    });
+    pendingPermissions.push({ id: msg.id, element: d });
+  }
+
+  messagesEl.appendChild(d);
+  if (isAtBottom) scrollToBottom();
+  return d;
+}
+
 function copyText(text) {
   navigator.clipboard.writeText(text).catch(() => {});
 }
@@ -743,8 +900,8 @@ function setProcessing(v) {
 }
 
 function updateModeBtn() {
-  const label = MODE_LABELS[currentMode] || currentMode;
-  const color = MODE_COLORS[currentMode] || '#888';
+  const label = modeName(currentMode);
+  const color = modeColor(currentMode);
   modeBtn.textContent = label;
   modeBtn.style.color = color;
   modeBtn.style.borderColor = color;
@@ -823,6 +980,7 @@ function scheduleReconnect() {
     currentAgentMsg = null;
     sessionId = null;
     allReplayTurns = [];
+    pendingPermissions = [];
     renderedTurnStart = 0;
     if (currentSockPid) {
       connect(String(currentSockPid));
@@ -849,7 +1007,7 @@ function toolOutputText(update) {
 }
 
 function renderTurnBatch(turns, prepend) {
-  const fragment = document.createDocumentFragment();
+  let fragment = document.createDocumentFragment();
   let lastToolEl = null;
   for (const t of turns) {
     switch (t.type) {
@@ -883,6 +1041,18 @@ function renderTurnBatch(turns, prepend) {
       case 'tool_update':
         if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
         break;
+      case 'permission': {
+        // Append batch so far, render permission (it appends to messagesEl),
+        // then start a new fragment for remaining turns
+        if (prepend) {
+          messagesEl.insertBefore(fragment, messagesEl.firstChild);
+        } else {
+          messagesEl.appendChild(fragment);
+        }
+        fragment = document.createDocumentFragment();
+        addPermissionMsg(t.msg, t.interactive || false);
+        break;
+      }
       case 'error': {
         const d = document.createElement('div');
         d.className = 'msg error';
@@ -1047,6 +1217,15 @@ function flushReplay() {
       document.getElementById('kill-btn').style.display = '';
       continue;
     }
+    // Permission requests from agent (reverse calls)
+    if (msg.method === 'session/request_permission' && msg.id !== undefined) {
+      if (pendingText) {
+        turns.push({type: 'agent', text: pendingText});
+        pendingText = '';
+      }
+      turns.push({type: 'permission', msg: msg});
+      continue;
+    }
     if (msg.method !== 'session/update' || !msg.params) continue;
     const update = msg.params.update;
     if (!update) continue;
@@ -1085,6 +1264,12 @@ function flushReplay() {
         if (sessionId) sendBtn.disabled = false;
         setProcessing(false);
         break;
+      case 'current_mode_update':
+        if (update.currentModeId) {
+          currentMode = update.currentModeId;
+          updateModeBtn();
+        }
+        break;
     }
   }
   // Flush any remaining agent text
@@ -1096,6 +1281,14 @@ function flushReplay() {
   // (no stopReason response and no available_commands_update seen at the end)
   if (!replayEnded) {
     setProcessing(true);
+    // If the last turn is a permission request, the agent is waiting for approval —
+    // mark it interactive so the user can respond
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].type === 'permission') {
+        turns[i].interactive = true;
+        break;
+      }
+    }
   }
 
   // Store all turns; render only the last chunk
@@ -1227,13 +1420,29 @@ function handleMessage(msg) {
         setProcessing(false);
         flushMessageQueue();
         break;
+
+      case 'current_mode_update':
+        if (update.currentModeId) {
+          currentMode = update.currentModeId;
+          updateModeBtn();
+        }
+        break;
     }
     return;
   }
 
   // Reverse call from agent
+  if (msg.method === 'session/request_permission' && msg.id !== undefined) {
+    addPermissionMsg(msg, true);
+    return;
+  }
   if (msg.method && msg.id !== undefined) {
-    addSystemMsg('agent: ' + msg.method);
+    // Unknown reverse call — respond with error so agent doesn't hang
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0', id: msg.id,
+      error: { code: -32601, message: 'Method not supported: ' + msg.method }
+    }));
+    addSystemMsg('Unsupported: ' + msg.method);
   }
 }
 
@@ -1289,6 +1498,17 @@ function flushMessageQueue() {
 
 function cancelPrompt() {
   if (!sessionId) return;
+  // Cancel all pending permission requests
+  for (const p of pendingPermissions) {
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0', id: p.id,
+      result: { outcome: { outcome: 'cancelled' } }
+    }));
+    p.element.classList.add('resolved');
+    const btns = p.element.querySelectorAll('.perm-btn');
+    btns.forEach(b => { b.disabled = true; });
+  }
+  pendingPermissions = [];
   ws.send(JSON.stringify({
     jsonrpc: '2.0',
     method: 'session/cancel',
@@ -1595,6 +1815,7 @@ function selectSession(session) {
   document.getElementById('kill-btn').style.display = currentBufferName ? '' : 'none';
   availableModes = [];
   allReplayTurns = [];
+  pendingPermissions = [];
   renderedTurnStart = 0;
   sendBtn.disabled = true;
   setProcessing(false);
