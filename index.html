@@ -44,7 +44,18 @@ body {
   padding: 10px 16px 4px; font-size: 13px; font-weight: 700;
   color: #888; text-transform: uppercase; letter-spacing: 0.5px;
   background: #121212; position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
 }
+.project-header .ph-add {
+  font-size: 16px; color: #666; background: none; border: none;
+  padding: 0 4px; cursor: pointer; line-height: 1;
+}
+.project-header .ph-add:active { color: #fff; }
+.session-card .sc-delete {
+  font-size: 14px; color: #555; background: none; border: none;
+  padding: 4px 6px; cursor: pointer; flex-shrink: 0; line-height: 1;
+}
+.session-card .sc-delete:active { color: #F44336; }
 .session-card {
   padding: 12px 16px; border-bottom: 1px solid #1e1e1e;
   cursor: pointer; display: flex; align-items: flex-start; gap: 12px;
@@ -1524,7 +1535,14 @@ function renderSessions(sessions) {
 
     const header = document.createElement('div');
     header.className = 'project-header';
-    header.textContent = proj;
+    const headerLabel = document.createElement('span');
+    headerLabel.textContent = proj;
+    header.appendChild(headerLabel);
+    const addBtn = document.createElement('button');
+    addBtn.className = 'ph-add';
+    addBtn.textContent = '+';
+    addBtn.onclick = (e) => { e.stopPropagation(); spawnInProject(group[0].cwd); };
+    header.appendChild(addBtn);
     groupEl.appendChild(header);
 
     for (let i = 0; i < group.length; i++) {
@@ -1555,6 +1573,13 @@ function makeSessionCard(s, name) {
       (s.cwd ? '<div class="sc-path">' + escHtml(shortPath(s.cwd)) + '</div>' : '') +
       (s.lastActivity ? '<div class="sc-time">' + timeAgo(s.lastActivity) + '</div>' : '') +
     '</div>';
+  if (s.bufferName) {
+    const del = document.createElement('button');
+    del.className = 'sc-delete';
+    del.textContent = '\u00d7';
+    del.onclick = (e) => { e.stopPropagation(); killSessionByName(s.bufferName); };
+    d.appendChild(del);
+  }
   d.onclick = () => selectSession(s);
   return d;
 }
@@ -1612,12 +1637,11 @@ async function spawnAgent() {
   if (lastSessions.length > 0) {
     // Pick from existing project cwds
     const cwds = [...new Set(lastSessions.map(s => s.cwd).filter(Boolean))];
-    if (cwds.length === 1) {
-      cwd = cwds[0];
-    } else if (cwds.length > 1) {
+    if (cwds.length > 0) {
       const choice = window.prompt(
         'Project directory:\n' + cwds.map((c, i) => (i + 1) + '. ' + shortPath(c)).join('\n') +
-        '\n\nEnter number or full path:');
+        '\n\nEnter number or full path:',
+        cwds.length === 1 ? '1' : '');
       if (!choice) return;
       const num = parseInt(choice);
       cwd = (num >= 1 && num <= cwds.length) ? cwds[num - 1] : choice;
@@ -1673,6 +1697,36 @@ async function killSession() {
   } catch (err) {
     alert('Kill failed: ' + err.message);
   }
+}
+
+async function spawnInProject(cwd) {
+  const name = window.prompt('Agent name:');
+  if (!name) return;
+  const task = window.prompt('Initial task (optional):') || '';
+  try {
+    const resp = await fetch(basePath + '/api/spawn', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cwd, name, task })
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Spawn failed: ' + data.error); return; }
+    setTimeout(loadSessions, 2000);
+  } catch (err) { alert('Spawn failed: ' + err.message); }
+}
+
+async function killSessionByName(bufferName) {
+  if (!window.confirm('Kill "' + bufferName + '"?')) return;
+  try {
+    const resp = await fetch(basePath + '/api/kill', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bufferName })
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Kill failed: ' + data.error); return; }
+    setTimeout(loadSessions, 500);
+  } catch (err) { alert('Kill failed: ' + err.message); }
 }
 
 // Start: try loading sessions (discover mode), fall back to direct connect
