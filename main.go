@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ import (
 
 //go:embed index.html
 var indexHTML []byte
+
+var validBufferName = regexp.MustCompile(`^[\w\s.\-@<>/()]+$`)
 
 type tailscaleInfo struct {
 	Hostname string
@@ -521,7 +524,14 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Escape double quotes in buffer name for elisp string
+	// Validate buffer name: only allow characters that appear in agent-shell names
+	// (e.g. "Claude Code Agent @ myproject<2>")
+	if !validBufferName.MatchString(req.BufferName) {
+		http.Error(w, "invalid buffer name", http.StatusBadRequest)
+		return
+	}
+
+	// Escape for elisp string
 	escaped := strings.ReplaceAll(req.BufferName, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	expr := fmt.Sprintf(`(meta-agent-shell-close-session "%s")`, escaped)
