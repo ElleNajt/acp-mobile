@@ -25,6 +25,22 @@ go build -o acp-mobile .
 
 The server binds to `127.0.0.1` only. On first run it generates an authkey and prints a URL with the key embedded — open that URL to authenticate.
 
+## Session names
+
+acp-mobile shows session names from acp-multiplex. To pass agent-shell buffer names through, set the `ACP_MULTIPLEX_NAME` environment variable when spawning the acp-multiplex process. In agent-shell, this requires injecting it into `:environment-variables` (not `process-environment`) because `acp.el` starts the process lazily:
+
+```elisp
+(advice-add 'agent-shell--make-acp-client :around
+            (lambda (orig-fn &rest args)
+              (let* ((buf (plist-get args :context-buffer))
+                     (name-var (when buf
+                                 (format "ACP_MULTIPLEX_NAME=%s" (buffer-name buf)))))
+                (when name-var
+                  (plist-put args :environment-variables
+                             (cons name-var (plist-get args :environment-variables))))
+                (apply orig-fn args))))
+```
+
 ## Requirements
 
 - Go 1.21+
