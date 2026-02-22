@@ -299,14 +299,15 @@ func main() {
 		wrapped.ServeHTTP(w, r)
 	})
 
-	// Note: no ReadTimeout/WriteTimeout on the server because they kill
-	// long-lived WebSocket connections. Body size limit above handles
-	// the request size concern; idle timeout handles connection cleanup.
+	// No ReadTimeout/WriteTimeout because they kill long-lived WebSocket
+	// connections. ReadHeaderTimeout protects against slowloris without
+	// affecting WebSockets (only applies during header read).
 	makeServer := func(addr string) *http.Server {
 		return &http.Server{
-			Addr:        addr,
-			Handler:     limited,
-			IdleTimeout: 120 * time.Second,
+			Addr:              addr,
+			Handler:           limited,
+			IdleTimeout:       120 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 	}
 
