@@ -33,13 +33,58 @@ var indexHTML []byte
 
 var validBufferName = regexp.MustCompile(`^[\w\s.\-@<>/()]+$`)
 
+// --- Configuration ---
+
+type config struct {
+	ExtraPath []string `json:"extraPath"`
+}
+
+var appConfig config
+
+func configPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".acp-mobile", "config.json")
+}
+
+func loadConfig() config {
+	var cfg config
+	data, err := os.ReadFile(configPath())
+	if err != nil {
+		return cfg
+	}
+	json.Unmarshal(data, &cfg)
+	return cfg
+}
+
+// command creates an exec.Cmd with extra PATH directories from config.
+func command(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	if len(appConfig.ExtraPath) > 0 {
+		env := os.Environ()
+		extra := strings.Join(appConfig.ExtraPath, ":")
+		found := false
+		for i, e := range env {
+			if strings.HasPrefix(e, "PATH=") {
+				env[i] = "PATH=" + extra + ":" + e[5:]
+				found = true
+				break
+			}
+		}
+		if !found {
+			env = append(env, "PATH="+extra)
+		}
+		cmd.Env = env
+	}
+	return cmd
+}
+
 type tailscaleInfo struct {
 	Hostname string
 	IP       string
 }
 
 func tailscaleSelf() (tailscaleInfo, error) {
-	out, err := exec.Command("tailscale", "status", "--self", "--json").Output()
+	out, err := command("tailscale", "status", "--self", "--json").Output()
 	if err != nil {
 		return tailscaleInfo{}, err
 	}
@@ -130,6 +175,8 @@ func (rl *rateLimiter) record(ip string) {
 var testMode bool
 
 func main() {
+	appConfig = loadConfig()
+
 	port := "8090"
 	for _, arg := range os.Args[1:] {
 		if arg == "--test-mode" {
@@ -503,7 +550,7 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 		args = append(args, req.Task)
 	}
 
-	out, err := exec.Command("agent-shell-spawn", args...).CombinedOutput()
+	out, err := command("agent-shell-spawn", args...).CombinedOutput()
 	if err != nil {
 		log.Printf("spawn: %v: %s", err, out)
 		w.Header().Set("Content-Type", "application/json")
@@ -546,7 +593,7 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	expr := fmt.Sprintf(`(meta-agent-shell-close-session "%s")`, escaped)
 
-	out, err := exec.Command("emacsclient", "--eval", expr).CombinedOutput()
+	out, err := command("emacsclient", "--eval", expr).CombinedOutput()
 	if err != nil {
 		log.Printf("kill: %v: %s", err, out)
 		w.Header().Set("Content-Type", "application/json")
@@ -677,7 +724,7 @@ func processCwd(pid int) string {
 		return target
 	}
 	// Fall back to lsof (macOS)
-	out, err := exec.Command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output()
+	out, err := command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output()
 	if err != nil {
 		return ""
 	}
