@@ -401,6 +401,20 @@ body {
 }
 #scroll-btn:active { background: rgba(0,122,255,1); }
 
+/* Swipe navigation indicator */
+#swipe-indicator {
+  display: none; position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.8); color: #fff; padding: 12px 24px;
+  border-radius: 12px; font-size: 15px; font-weight: 600;
+  z-index: 50; pointer-events: none; text-align: center;
+  max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#swipe-indicator.visible { display: block; }
+#swipe-indicator .swipe-dir {
+  font-size: 11px; color: #888; margin-bottom: 4px; display: block;
+}
+
 /* Input area */
 #input-area {
   border-top: 1px solid #333; padding: 12px;
@@ -511,6 +525,7 @@ body {
   <div id="fbv-content"></div>
 </div>
 <div id="messages"></div>
+<div id="swipe-indicator"></div>
 <div id="thinking"><div class="spinner"></div><span class="label">Agent is thinking...</span></div>
 <button id="scroll-btn">&darr;</button>
 <div id="input-area">
@@ -1423,14 +1438,20 @@ function flushReplay() {
   // (no stopReason response and no available_commands_update seen at the end)
   if (!replayEnded) {
     setProcessing(true);
-    // If the last turn is a permission request, the agent is waiting for approval —
-    // mark it interactive so the user can respond
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].type === 'permission') {
-        turns[i].interactive = true;
-        break;
-      }
+  }
+
+  // If the last turn is a permission request, the agent is waiting for
+  // approval — mark it interactive so the user can respond. This is
+  // checked independently of replayEnded because the pending permission
+  // is appended after all cached updates (which may include turn_complete
+  // from a previous turn).
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].type === 'permission') {
+      turns[i].interactive = true;
+      break;
     }
+    // Stop searching once we hit a non-permission turn
+    if (turns[i].type !== 'error') break;
   }
 
   // Store all turns; render only the last chunk
