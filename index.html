@@ -1440,18 +1440,15 @@ function flushReplay() {
     setProcessing(true);
   }
 
-  // If the last turn is a permission request, the agent is waiting for
-  // approval — mark it interactive so the user can respond. This is
-  // checked independently of replayEnded because the pending permission
-  // is appended after all cached updates (which may include turn_complete
-  // from a previous turn).
+  // If there's a pending permission in replay, mark it interactive.
+  // The cache only stores a permission while it's unanswered, so any
+  // permission found here is guaranteed to need interaction.
   for (let i = turns.length - 1; i >= 0; i--) {
     if (turns[i].type === 'permission') {
       turns[i].interactive = true;
+      setProcessing(true);
       break;
     }
-    // Stop searching once we hit a non-permission turn
-    if (turns[i].type !== 'error') break;
   }
 
   // Store all turns; render only the last chunk
