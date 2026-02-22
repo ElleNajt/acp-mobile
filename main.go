@@ -127,10 +127,16 @@ func (rl *rateLimiter) record(ip string) {
 	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
 }
 
+var testMode bool
+
 func main() {
 	port := "8090"
-	if len(os.Args) > 1 {
-		port = os.Args[1]
+	for _, arg := range os.Args[1:] {
+		if arg == "--test-mode" {
+			testMode = true
+		} else {
+			port = arg
+		}
 	}
 
 	authKey := loadOrCreateAuthKey()
@@ -182,7 +188,10 @@ func main() {
 		Handshake: func(config *websocket.Config, r *http.Request) error {
 			origin := r.Header.Get("Origin")
 			if origin == "" {
-				return nil
+				if testMode {
+					return nil
+				}
+				return fmt.Errorf("missing Origin header")
 			}
 			u, err := url.Parse(origin)
 			if err != nil || u.Host != r.Host {
