@@ -41,6 +41,10 @@ acp-mobile shows session names from acp-multiplex. To pass agent-shell buffer na
                 (apply orig-fn args))))
 ```
 
+## Stopping acp-mobile
+
+Don't use `pkill -f acp-mobile` — on macOS, `-f` can match unrelated processes (confirmed empirically: `pgrep -f acp-mobile` matches claude agent processes). Best guess is that node's `process.title` argv rewriting causes `pgrep -f` to search into environment variable data in `KERN_PROCARGS2`. Use `pkill -x acp-mobile` instead.
+
 ## Requirements
 
 - Go 1.21+
