@@ -1164,6 +1164,7 @@ function renderTurnBatch(turns, prepend) {
       }
       case 'tool':
         lastToolEl = addToolMsgTo(fragment, t.toolName, t.toolParams);
+        if (t.toolStatus) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
         break;
       case 'tool_update':
         if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
@@ -1402,9 +1403,28 @@ function flushReplay() {
         }
         break;
       }
-      case 'tool_call_update':
-        turns.push({type: 'tool_update', toolStatus: update.status || 'completed', toolContent: toolOutputText(update)});
+      case 'tool_call_update': {
+        // Merge into the parent tool turn instead of creating a separate turn.
+        // This prevents orphaned tool_updates when the INITIAL_TURNS window
+        // or load-more batches split a tool from its update.
+        const tcuId = update.toolCallId;
+        let merged = false;
+        if (tcuId) {
+          for (let j = turns.length - 1; j >= 0; j--) {
+            if (turns[j].type === 'tool' && turns[j].toolCallId === tcuId) {
+              turns[j].toolStatus = update.status || 'completed';
+              turns[j].toolContent = toolOutputText(update);
+              merged = true;
+              break;
+            }
+          }
+        }
+        if (!merged) {
+          // Fallback: no matching tool turn found, append as standalone
+          turns.push({type: 'tool_update', toolStatus: update.status || 'completed', toolContent: toolOutputText(update)});
+        }
         break;
+      }
       case 'user_message_chunk':
         if (pendingText) {
           turns.push({type: 'agent', text: pendingText});
