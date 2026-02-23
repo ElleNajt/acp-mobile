@@ -1134,6 +1134,7 @@ function toolOutputText(update) {
     }
   }
   if (typeof update.content === 'string') return update.content;
+  if (update.content && update.content.text) return update.content.text;
   return '';
 }
 
