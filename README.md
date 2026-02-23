@@ -4,7 +4,7 @@
 >
 > **Security warning:** This exposes ACP agent sessions over HTTP/WebSocket. It has hardening measures (authkey cookies, CSRF via Sec-Fetch-Site, DNS rebinding protection, CSP nonces, rate-limited auth, localhost-only binding) and is designed for use over Tailscale, but it hasn't had a dedicated security review. Be cautious about exposing machines with sensitive data or credentials.
 
-Mobile web UI for [ACP](https://github.com/anthropics/acp) sessions running through [acp-multiplex](https://github.com/ElleNajt/acp-multiplex).
+Mobile web UI for [ACP](https://github.com/zed-industries/agent-client-protocol) sessions running through [acp-multiplex](https://github.com/ElleNajt/acp-multiplex).
 
 Discovers all live acp-multiplex sockets on the machine, groups them by project, and lets you chat with any session from your phone.
 
