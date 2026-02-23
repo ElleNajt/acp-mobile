@@ -710,24 +710,24 @@ function updateAgentMsg(el, text) {
   if (isAtBottom) scrollToBottom();
 }
 
-function addToolMsg(toolName, params) {
+function addToolMsg(toolName, params, type) {
   const d = document.createElement('div');
   d.className = 'msg tool';
   d.id = 'msg-' + (++msgIdCounter);
 
-  const cleanName = toolName.replace('mcp__acp__', '');
+  const cleanType = (type || toolName).replace('mcp__acp__', '');
 
   // Pick icon based on tool type
   let icon = '\u2699'; // gear
-  if (cleanName === 'Read') icon = '\uD83D\uDCD6';
-  else if (cleanName === 'Write') icon = '\uD83D\uDCDD';
-  else if (cleanName === 'Edit') icon = '\u270F\uFE0F';
-  else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
-  else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
+  if (cleanType === 'Read') icon = '\uD83D\uDCD6';
+  else if (cleanType === 'Write') icon = '\uD83D\uDCDD';
+  else if (cleanType === 'Edit') icon = '\u270F\uFE0F';
+  else if (cleanType === 'Bash') icon = '\uD83D\uDCBB';
+  else if (cleanType === 'Grep' || cleanType === 'Glob') icon = '\uD83D\uDD0D';
 
   // Extract subtitle (path/command) and description from params
   let subtitle = '';
-  let titleText = cleanName;
+  let titleText = toolName;
   if (params) {
     subtitle = params.file_path || params.path || params.command || '';
     if (params.description) titleText = params.description;
@@ -740,9 +740,9 @@ function addToolMsg(toolName, params) {
 
   // Pre-populate tool body with input details for Edit/Write
   let bodyHtml = '';
-  if (params && cleanName === 'Edit' && params.old_string) {
+  if (params && cleanType === 'Edit' && params.old_string) {
     bodyHtml = renderDiff(params.old_string, params.new_string || '');
-  } else if (params && cleanName === 'Write' && params.content) {
+  } else if (params && cleanType === 'Write' && params.content) {
     const preview = params.content.length > 2000
       ? params.content.slice(0, 2000) + '\n... (truncated)'
       : params.content;
@@ -773,10 +773,10 @@ function addToolMsg(toolName, params) {
   return d;
 }
 
-function updateToolInfo(toolEl, name, params) {
-  const cleanName = name.replace('mcp__acp__', '');
+function updateToolInfo(toolEl, name, params, type) {
+  const cleanType = (type || name).replace('mcp__acp__', '');
   const nameEl = toolEl.querySelector('.tool-name');
-  let titleText = cleanName;
+  let titleText = name;
   if (params && params.description) titleText = params.description;
   if (nameEl) nameEl.textContent = titleText;
 
@@ -801,9 +801,9 @@ function updateToolInfo(toolEl, name, params) {
   const body = toolEl.querySelector('.tool-body');
   if (body && !body.innerHTML.trim()) {
     let bodyHtml = '';
-    if (params && cleanName === 'Edit' && params.old_string) {
+    if (params && cleanType === 'Edit' && params.old_string) {
       bodyHtml = renderDiff(params.old_string, params.new_string || '');
-    } else if (params && cleanName === 'Write' && params.content) {
+    } else if (params && cleanType === 'Write' && params.content) {
       const preview = params.content.length > 2000
         ? params.content.slice(0, 2000) + '\n... (truncated)'
         : params.content;
@@ -1112,8 +1112,12 @@ function scheduleReconnect() {
   }, delay);
 }
 
+function toolType(update) {
+  return (update._meta && update._meta.claudeCode && update._meta.claudeCode.toolName) || '';
+}
+
 function toolName(update) {
-  return update.title || (update._meta && update._meta.claudeCode && update._meta.claudeCode.toolName) || '?';
+  return update.title || toolType(update) || '?';
 }
 
 function toolOutputText(update) {
@@ -1163,7 +1167,7 @@ function renderTurnBatch(turns, prepend) {
         break;
       }
       case 'tool':
-        lastToolEl = addToolMsgTo(fragment, t.toolName, t.toolParams);
+        lastToolEl = addToolMsgTo(fragment, t.toolName, t.toolParams, t.toolType);
         if (t.toolStatus) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
         break;
       case 'tool_update':
@@ -1200,21 +1204,21 @@ function renderTurnBatch(turns, prepend) {
 }
 
 // Like addToolMsg but appends to a given parent (DocumentFragment)
-function addToolMsgTo(parent, toolName, params) {
+function addToolMsgTo(parent, toolName, params, type) {
   const d = document.createElement('div');
   d.className = 'msg tool';
   d.id = 'msg-' + (++msgIdCounter);
 
-  const cleanName = toolName.replace('mcp__acp__', '');
+  const cleanType = (type || toolName).replace('mcp__acp__', '');
   let icon = '\u2699';
-  if (cleanName === 'Read') icon = '\uD83D\uDCD6';
-  else if (cleanName === 'Write') icon = '\uD83D\uDCDD';
-  else if (cleanName === 'Edit') icon = '\u270F\uFE0F';
-  else if (cleanName === 'Bash') icon = '\uD83D\uDCBB';
-  else if (cleanName === 'Grep' || cleanName === 'Glob') icon = '\uD83D\uDD0D';
+  if (cleanType === 'Read') icon = '\uD83D\uDCD6';
+  else if (cleanType === 'Write') icon = '\uD83D\uDCDD';
+  else if (cleanType === 'Edit') icon = '\u270F\uFE0F';
+  else if (cleanType === 'Bash') icon = '\uD83D\uDCBB';
+  else if (cleanType === 'Grep' || cleanType === 'Glob') icon = '\uD83D\uDD0D';
 
   let subtitle = '';
-  let titleText = cleanName;
+  let titleText = toolName;
   if (params) {
     subtitle = params.file_path || params.path || params.command || '';
     if (params.description) titleText = params.description;
@@ -1226,9 +1230,9 @@ function addToolMsgTo(parent, toolName, params) {
   }
 
   let bodyHtml = '';
-  if (params && cleanName === 'Edit' && params.old_string) {
+  if (params && cleanType === 'Edit' && params.old_string) {
     bodyHtml = renderDiff(params.old_string, params.new_string || '');
-  } else if (params && cleanName === 'Write' && params.content) {
+  } else if (params && cleanType === 'Write' && params.content) {
     const preview = params.content.length > 2000
       ? params.content.slice(0, 2000) + '\n... (truncated)'
       : params.content;
@@ -1388,6 +1392,7 @@ function flushReplay() {
           for (let j = turns.length - 1; j >= 0; j--) {
             if (turns[j].type === 'tool' && turns[j].toolCallId === tcId) {
               turns[j].toolName = toolName(update);
+              turns[j].toolType = toolType(update) || turns[j].toolType;
               turns[j].toolParams = update.rawInput || null;
               found = true;
               break;
@@ -1399,7 +1404,7 @@ function flushReplay() {
             turns.push({type: 'agent', text: pendingText});
             pendingText = '';
           }
-          turns.push({type: 'tool', toolCallId: tcId, toolName: toolName(update), toolParams: update.rawInput || null});
+          turns.push({type: 'tool', toolCallId: tcId, toolName: toolName(update), toolType: toolType(update), toolParams: update.rawInput || null});
         }
         break;
       }
@@ -1582,10 +1587,10 @@ function handleMessage(msg) {
         // If we already have an element for this toolCallId, update it in place
         const existing = tcId && messagesEl._toolCalls && messagesEl._toolCalls[tcId];
         if (existing) {
-          updateToolInfo(existing, toolName(update), update.rawInput || null);
+          updateToolInfo(existing, toolName(update), update.rawInput || null, toolType(update));
           messagesEl._lastTool = existing;
         } else {
-          const el = addToolMsg(toolName(update), update.rawInput || null);
+          const el = addToolMsg(toolName(update), update.rawInput || null, toolType(update));
           messagesEl._lastTool = el;
           if (tcId) {
             if (!messagesEl._toolCalls) messagesEl._toolCalls = {};
