@@ -892,7 +892,8 @@ function addPermissionMsg(msg, interactive) {
   // Icon based on tool kind
   const KIND_ICONS = {
     read: '\uD83D\uDCD6', edit: '\u270F\uFE0F', delete: '\uD83D\uDDD1',
-    execute: '\uD83D\uDCBB', search: '\uD83D\uDD0D', fetch: '\uD83C\uDF10'
+    execute: '\uD83D\uDCBB', search: '\uD83D\uDD0D', fetch: '\uD83C\uDF10',
+    switch_mode: '\uD83D\uDCCB'
   };
   const icon = KIND_ICONS[tc.kind] || '\uD83D\uDD12';
 
@@ -916,7 +917,10 @@ function addPermissionMsg(msg, interactive) {
 
   // Detail: show diff or text content
   let detailHtml = '';
-  if (tc.content && tc.content.length > 0) {
+  // ExitPlanMode: show the plan text from rawInput.plan
+  if (tc.kind === 'switch_mode' && tc.rawInput && tc.rawInput.plan) {
+    detailHtml = '<div class="perm-detail md">' + renderMarkdown(tc.rawInput.plan) + '</div>';
+  } else if (tc.content && tc.content.length > 0) {
     const c = tc.content[0];
     if (c.type === 'diff' && c.oldText !== undefined) {
       detailHtml = '<div class="perm-detail">' + renderDiff(c.oldText, c.newText || '') + '</div>';
