@@ -1422,8 +1422,16 @@ function flushReplay() {
         if (tcuId) {
           for (let j = turns.length - 1; j >= 0; j--) {
             if (turns[j].type === 'tool' && turns[j].toolCallId === tcuId) {
-              turns[j].toolStatus = update.status || 'completed';
-              turns[j].toolContent = toolOutputText(update);
+              if (update.status) turns[j].toolStatus = update.status;
+              const out = toolOutputText(update);
+              if (out) turns[j].toolContent = out;
+              // Merge rawInput/title/kind from updates (e.g. Bash gets command after initial "Terminal")
+              if (update.rawInput && Object.keys(update.rawInput).length > 0) {
+                turns[j].toolParams = update.rawInput;
+              }
+              if (update.title) turns[j].toolName = update.title;
+              if (toolType(update)) turns[j].toolType = toolType(update);
+              if (update.kind) turns[j].toolKind = update.kind;
               merged = true;
               break;
             }
