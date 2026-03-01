@@ -742,6 +742,8 @@ function addToolMsg(toolName, params, type) {
   let bodyHtml = '';
   if (params && cleanType === 'Edit' && params.old_string) {
     bodyHtml = renderDiff(params.old_string, params.new_string || '');
+  } else if (params && params.plan) {
+    bodyHtml = '<div class="md">' + renderMarkdown(params.plan) + '</div>';
   } else if (params && cleanType === 'Write' && params.content) {
     const preview = params.content.length > 2000
       ? params.content.slice(0, 2000) + '\n... (truncated)'
@@ -753,7 +755,7 @@ function addToolMsg(toolName, params, type) {
     for (const [k, v] of Object.entries(params)) {
       if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue; // already in title/subtitle
       const s = typeof v === 'string' ? v : JSON.stringify(v);
-      if (s.length < 200) parts.push(k + ': ' + s);
+      parts.push(k + ': ' + s);
     }
     if (parts.length) bodyHtml = escHtml(parts.join('\n'));
   }
@@ -803,7 +805,9 @@ function updateToolInfo(toolEl, name, params, type) {
     let bodyHtml = '';
     if (params && cleanType === 'Edit' && params.old_string) {
       bodyHtml = renderDiff(params.old_string, params.new_string || '');
-    } else if (params && cleanType === 'Write' && params.content) {
+    } else if (params && params.plan) {
+    bodyHtml = '<div class="md">' + renderMarkdown(params.plan) + '</div>';
+  } else if (params && cleanType === 'Write' && params.content) {
       const preview = params.content.length > 2000
         ? params.content.slice(0, 2000) + '\n... (truncated)'
         : params.content;
@@ -814,7 +818,7 @@ function updateToolInfo(toolEl, name, params, type) {
       for (const [k, v] of Object.entries(params)) {
         if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue;
         const s = typeof v === 'string' ? v : JSON.stringify(v);
-        if (s.length < 200) parts.push(k + ': ' + s);
+        parts.push(k + ': ' + s);
       }
       if (parts.length) bodyHtml = escHtml(parts.join('\n'));
     }
@@ -1237,6 +1241,8 @@ function addToolMsgTo(parent, toolName, params, type) {
   let bodyHtml = '';
   if (params && cleanType === 'Edit' && params.old_string) {
     bodyHtml = renderDiff(params.old_string, params.new_string || '');
+  } else if (params && params.plan) {
+    bodyHtml = '<div class="md">' + renderMarkdown(params.plan) + '</div>';
   } else if (params && cleanType === 'Write' && params.content) {
     const preview = params.content.length > 2000
       ? params.content.slice(0, 2000) + '\n... (truncated)'
@@ -1247,7 +1253,7 @@ function addToolMsgTo(parent, toolName, params, type) {
     for (const [k, v] of Object.entries(params)) {
       if (k === 'file_path' || k === 'path' || k === 'command' || k === 'description') continue;
       const s = typeof v === 'string' ? v : JSON.stringify(v);
-      if (s.length < 200) parts.push(k + ': ' + s);
+      parts.push(k + ': ' + s);
     }
     if (parts.length) bodyHtml = escHtml(parts.join('\n'));
   }
