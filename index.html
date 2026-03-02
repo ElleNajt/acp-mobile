@@ -1623,6 +1623,9 @@ function handleMessage(msg) {
         const tcuId = update.toolCallId;
         const toolEl = (tcuId && messagesEl._toolCalls && messagesEl._toolCalls[tcuId]) || messagesEl._lastTool;
         if (toolEl) {
+          if (update.title || (update.rawInput && Object.keys(update.rawInput).length > 0)) {
+            updateToolInfo(toolEl, update.title || toolEl.querySelector('.tool-name')?.textContent || '?', update.rawInput || null, toolType(update) || null);
+          }
           updateToolStatus(toolEl, update.status || 'completed', toolOutputText(update));
         }
         break;
