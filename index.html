@@ -980,6 +980,64 @@ function addPermissionMsg(msg, interactive) {
   return d;
 }
 
+// Add approve/reject buttons to a pending ExitPlanMode tool card.
+// The card already shows the plan text; this adds interactive buttons.
+function addPlanApprovalButtons(toolEl) {
+  const btns = document.createElement('div');
+  btns.className = 'perm-options';
+  btns.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;padding:0 12px 12px';
+
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'perm-btn allow';
+  approveBtn.textContent = 'Approve';
+  approveBtn.style.cssText = 'border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#238636;color:#fff';
+
+  const rejectBtn = document.createElement('button');
+  rejectBtn.className = 'perm-btn reject';
+  rejectBtn.textContent = 'Reject';
+  rejectBtn.style.cssText = 'border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#8b2020;color:#fff';
+
+  function respond(approved) {
+    // Check if there's a pending permission we can respond to
+    const pending = pendingPermissions.find(p => true); // any pending permission
+    if (pending) {
+      const optionId = approved ? 'default' : (pending.element ? 'reject' : 'default');
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0', id: pending.id,
+        result: { outcome: { outcome: 'selected', optionId: approved ? 'default' : 'reject' } }
+      }));
+      pendingPermissions = pendingPermissions.filter(p2 => p2.id !== pending.id);
+    } else {
+      // No pending permission — send as a prompt
+      if (sessionId && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0', id: Date.now(),
+          method: 'session/prompt',
+          params: {
+            sessionId: sessionId,
+            prompt: [{ type: 'text', text: approved ? 'Yes, proceed with the plan.' : 'No, reject the plan.' }]
+          }
+        }));
+      }
+    }
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    (approved ? approveBtn : rejectBtn).style.outline = '2px solid #fff';
+    (approved ? approveBtn : rejectBtn).style.outlineOffset = '1px';
+    toolEl.classList.add('resolved');
+  }
+
+  approveBtn.onclick = (e) => { e.stopPropagation(); respond(true); };
+  rejectBtn.onclick = (e) => { e.stopPropagation(); respond(false); };
+
+  btns.appendChild(approveBtn);
+  btns.appendChild(rejectBtn);
+
+  // Make card expanded by default so plan text and buttons are visible
+  toolEl.classList.add('expanded');
+  toolEl.appendChild(btns);
+}
+
 function copyText(text) {
   navigator.clipboard.writeText(text).then(() => {
     showToast('Copied to clipboard');
@@ -1149,7 +1207,8 @@ function toolOutputText(update) {
 function renderTurnBatch(turns, prepend) {
   let fragment = document.createDocumentFragment();
   let lastToolEl = null;
-  for (const t of turns) {
+  for (let _ti = 0; _ti < turns.length; _ti++) {
+    const t = turns[_ti];
     switch (t.type) {
       case 'user': {
         const d = document.createElement('div');
@@ -1178,6 +1237,11 @@ function renderTurnBatch(turns, prepend) {
       case 'tool':
         lastToolEl = addToolMsgTo(fragment, t.toolName, t.toolParams, t.toolType);
         if (t.toolStatus) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
+        // Pending ExitPlanMode: show plan approval buttons (unless a permission card follows)
+        if (t.toolKind === 'switch_mode' && t.toolParams && t.toolParams.plan && !t.toolStatus) {
+          const hasPermAfter = turns.slice(_ti + 1).some(t2 => t2.type === 'permission');
+          if (!hasPermAfter) addPlanApprovalButtons(lastToolEl);
+        }
         break;
       case 'tool_update':
         if (lastToolEl) updateToolStatus(lastToolEl, t.toolStatus, t.toolContent);
