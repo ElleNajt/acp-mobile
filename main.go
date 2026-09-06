@@ -251,6 +251,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/sessions", handleSessions)
+	mux.HandleFunc("/api/capabilities", handleCapabilities)
 	mux.HandleFunc("/api/spawn", handleSpawn)
 	mux.HandleFunc("/api/kill", handleKill)
 	mux.HandleFunc("/files/list", handleFileList)
@@ -370,6 +371,31 @@ func main() {
 	} else {
 		select {}
 	}
+}
+
+type capabilities struct {
+	Spawn bool `json:"spawn"`
+	Kill  bool `json:"kill"`
+}
+
+func availableCommand(name string) bool {
+	return command(name).Err == nil
+}
+
+func currentCapabilities() capabilities {
+	return capabilities{
+		Spawn: availableCommand("agent-shell-spawn"),
+		Kill:  availableCommand("emacsclient"),
+	}
+}
+
+func handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(currentCapabilities())
 }
 
 // --- Socket discovery ---
@@ -531,6 +557,10 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !availableCommand("agent-shell-spawn") {
+		http.Error(w, "agent-shell-spawn is not available; session spawning is disabled", http.StatusNotImplemented)
+		return
+	}
 
 	var req struct {
 		Cwd  string `json:"cwd"`
@@ -567,6 +597,10 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 func handleKill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !availableCommand("emacsclient") {
+		http.Error(w, "emacsclient is not available; session killing is disabled", http.StatusNotImplemented)
 		return
 	}
 

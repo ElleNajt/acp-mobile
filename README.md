@@ -23,7 +23,9 @@ go build -o acp-mobile .
 ./acp-mobile [port]  # default 8090
 ```
 
-The server binds to `127.0.0.1` only. On first run it generates an authkey and prints a URL with the key embedded — open that URL to authenticate.
+The server always binds to `127.0.0.1`. If Tailscale is installed and connected, it also binds to the machine's Tailscale IP and prints a Tailscale URL; open that URL on the iPhone to authenticate. On first run it generates an authkey.
+
+On macOS, build and run acp-mobile on the Mac that owns the ACP sockets, then open the printed Tailscale URL in Safari on the iPhone. For Zed, start an ACP-compatible session through Zed and leave its `acp-multiplex` proxy running; acp-mobile discovers that session automatically. The session chat and file browser work independently of Emacs. Spawn and Kill controls appear only when the corresponding agent-shell/Emacs helper is installed, so Zed-only setups will not show controls they cannot use.
 
 ## Session names
 
@@ -47,5 +49,5 @@ Don't use `pkill -f acp-mobile` — on macOS, `-f` can match unrelated processes
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.25.5 (the version declared in `go.mod`)
 - One or more [acp-multiplex](https://github.com/ElleNajt/acp-multiplex) proxies running

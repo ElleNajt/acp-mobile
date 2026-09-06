@@ -15,6 +15,52 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+func TestCapabilitiesResponse(t *testing.T) {
+	oldConfig := appConfig
+	appConfig = config{}
+	defer func() { appConfig = oldConfig }()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capabilities", nil)
+	rec := httptest.NewRecorder()
+	handleCapabilities(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got capabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// The endpoint must expose both helper-dependent capabilities so the UI
+	// can hide controls on Zed-only installations.
+	if !strings.Contains(rec.Body.String(), `"spawn"`) || !strings.Contains(rec.Body.String(), `"kill"`) {
+		t.Fatalf("response missing capability fields: %s", rec.Body.String())
+	}
+}
+
+func TestHelperEndpointsReportUnavailable(t *testing.T) {
+	oldConfig := appConfig
+	appConfig = config{}
+	defer func() { appConfig = oldConfig }()
+	t.Setenv("PATH", t.TempDir())
+
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+	}{
+		{"spawn", handleSpawn},
+		{"kill", handleKill},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/"+tc.name, strings.NewReader(`{}`))
+			rec := httptest.NewRecorder()
+			tc.h(rec, req)
+			if rec.Code != http.StatusNotImplemented {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotImplemented)
+			}
+		})
+	}
+}
+
 // TestToolReplayIntegration verifies that tool_call and tool_call_update messages
 // are correctly relayed through the WebSocket bridge, with proper title, _meta,
 // rawInput, and content fields preserved.
