@@ -2288,8 +2288,10 @@ document.getElementById('send').addEventListener('click', sendPrompt);
 document.getElementById('stop-btn').addEventListener('click', cancelPrompt);
 
 // Start: try loading sessions (discover mode), fall back to direct connect
-loadCapabilities();
-loadSessions();
+(async () => {
+  await loadCapabilities();
+  await loadSessions();
+})();
 </script>
 </body>
 </html>

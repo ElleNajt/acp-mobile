@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,30 @@ func TestHelperEndpointsReportUnavailable(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotImplemented)
 			}
 		})
+	}
+}
+
+func TestConfiguredExtraPathResolvesHelpers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper files use Unix executable permissions")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"agent-shell-spawn", "emacsclient"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldConfig := appConfig
+	appConfig = config{ExtraPath: []string{dir}}
+	defer func() { appConfig = oldConfig }()
+
+	got := currentCapabilities()
+	if !got.Spawn || !got.Kill {
+		t.Fatalf("configured helper path not detected: %+v", got)
+	}
+	if command("agent-shell-spawn").Path != filepath.Join(dir, "agent-shell-spawn") {
+		t.Fatalf("command path = %q, want configured helper", command("agent-shell-spawn").Path)
 	}
 }
 

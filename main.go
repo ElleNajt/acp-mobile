@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,10 +59,10 @@ func loadConfig() config {
 
 // command creates an exec.Cmd with extra PATH directories from config.
 func command(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(resolveCommand(name), args...)
 	if len(appConfig.ExtraPath) > 0 {
 		env := os.Environ()
-		extra := strings.Join(appConfig.ExtraPath, ":")
+		extra := strings.Join(appConfig.ExtraPath, string(os.PathListSeparator))
 		found := false
 		for i, e := range env {
 			if strings.HasPrefix(e, "PATH=") {
@@ -76,6 +77,29 @@ func command(name string, args ...string) *exec.Cmd {
 		cmd.Env = env
 	}
 	return cmd
+}
+
+// resolveCommand performs LookPath against the same effective PATH that
+// command() gives child processes. exec.Command looks up PATH before Env is
+// assigned, so using it directly would ignore config.json's extraPath.
+func resolveCommand(name string) string {
+	if filepath.IsAbs(name) || strings.ContainsAny(name, `/\`) {
+		return name
+	}
+	pathValue := os.Getenv("PATH")
+	if len(appConfig.ExtraPath) > 0 {
+		pathValue = strings.Join(append(append([]string{}, appConfig.ExtraPath...), pathValue), string(os.PathListSeparator))
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode()&0111 != 0) {
+			return candidate
+		}
+	}
+	return name
 }
 
 type tailscaleInfo struct {
