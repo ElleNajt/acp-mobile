@@ -8,12 +8,83 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/net/websocket"
 )
+
+func TestCapabilitiesResponse(t *testing.T) {
+	oldConfig := appConfig
+	appConfig = config{}
+	defer func() { appConfig = oldConfig }()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capabilities", nil)
+	rec := httptest.NewRecorder()
+	handleCapabilities(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got capabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// The endpoint must expose both helper-dependent capabilities so the UI
+	// can hide controls on Zed-only installations.
+	if !strings.Contains(rec.Body.String(), `"spawn"`) || !strings.Contains(rec.Body.String(), `"kill"`) {
+		t.Fatalf("response missing capability fields: %s", rec.Body.String())
+	}
+}
+
+func TestHelperEndpointsReportUnavailable(t *testing.T) {
+	oldConfig := appConfig
+	appConfig = config{}
+	defer func() { appConfig = oldConfig }()
+	t.Setenv("PATH", t.TempDir())
+
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+	}{
+		{"spawn", handleSpawn},
+		{"kill", handleKill},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/"+tc.name, strings.NewReader(`{}`))
+			rec := httptest.NewRecorder()
+			tc.h(rec, req)
+			if rec.Code != http.StatusNotImplemented {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotImplemented)
+			}
+		})
+	}
+}
+
+func TestConfiguredExtraPathResolvesHelpers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper files use Unix executable permissions")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"agent-shell-spawn", "emacsclient"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldConfig := appConfig
+	appConfig = config{ExtraPath: []string{dir}}
+	defer func() { appConfig = oldConfig }()
+
+	got := currentCapabilities()
+	if !got.Spawn || !got.Kill {
+		t.Fatalf("configured helper path not detected: %+v", got)
+	}
+	if command("agent-shell-spawn").Path != filepath.Join(dir, "agent-shell-spawn") {
+		t.Fatalf("command path = %q, want configured helper", command("agent-shell-spawn").Path)
+	}
+}
 
 // TestToolReplayIntegration verifies that tool_call and tool_call_update messages
 // are correctly relayed through the WebSocket bridge, with proper title, _meta,

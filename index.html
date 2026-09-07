@@ -1432,7 +1432,7 @@ function flushReplay() {
     if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
       headerTitle.textContent = msg.params.name;
       currentBufferName = msg.params.name;
-      document.getElementById('kill-btn').style.display = '';
+      applyCapabilities();
       continue;
     }
     // Permission requests from agent (reverse calls)
@@ -1627,7 +1627,7 @@ function handleMessage(msg) {
   if (msg.method === 'acp-multiplex/meta' && msg.params && msg.params.name) {
     headerTitle.textContent = msg.params.name;
     currentBufferName = msg.params.name;
-    document.getElementById('kill-btn').style.display = '';
+    applyCapabilities();
     return;
   }
 
@@ -1962,6 +1962,22 @@ async function fbOpenFile(filePath) {
 let discoverMode = false;
 let sortMode = localStorage.getItem('acp-sort') || 'project'; // 'project' or 'recent'
 let lastSessions = [];
+let capabilities = {spawn: true, kill: true};
+
+function applyCapabilities() {
+  document.getElementById('spawn-btn').style.display = capabilities.spawn ? '' : 'none';
+  document.getElementById('kill-btn').style.display = capabilities.kill && currentBufferName ? '' : 'none';
+}
+
+async function loadCapabilities() {
+  try {
+    const resp = await fetch(basePath + '/api/capabilities');
+    if (resp.ok) capabilities = await resp.json();
+  } catch (_) {
+    // Keep controls visible when connected to an older server.
+  }
+  applyCapabilities();
+}
 
 function getLastViewed(pid) {
   return parseInt(localStorage.getItem('acp-viewed-' + pid) || '0', 10);
@@ -2050,11 +2066,13 @@ function renderSessions(sessions) {
     const headerLabel = document.createElement('span');
     headerLabel.textContent = proj;
     header.appendChild(headerLabel);
-    const addBtn = document.createElement('button');
-    addBtn.className = 'ph-add';
-    addBtn.textContent = '+';
-    addBtn.onclick = (e) => { e.stopPropagation(); spawnInProject(group[0].cwd); };
-    header.appendChild(addBtn);
+    if (capabilities.spawn) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'ph-add';
+      addBtn.textContent = '+';
+      addBtn.onclick = (e) => { e.stopPropagation(); spawnInProject(group[0].cwd); };
+      header.appendChild(addBtn);
+    }
     groupEl.appendChild(header);
 
     for (let i = 0; i < group.length; i++) {
@@ -2085,7 +2103,7 @@ function makeSessionCard(s, name) {
       (s.cwd ? '<div class="sc-path">' + escHtml(shortPath(s.cwd)) + '</div>' : '') +
       (s.lastActivity ? '<div class="sc-time">' + timeAgo(s.lastActivity) + '</div>' : '') +
     '</div>';
-  if (s.bufferName) {
+  if (s.bufferName && capabilities.kill) {
     const del = document.createElement('button');
     del.className = 'sc-delete';
     del.textContent = '\u00d7';
@@ -2104,7 +2122,7 @@ function selectSession(session) {
   sessionId = null;
   projectCwd = session.cwd || null;
   currentBufferName = session.bufferName || null;
-  document.getElementById('kill-btn').style.display = currentBufferName ? '' : 'none';
+  applyCapabilities();
   availableModes = [];
   allReplayTurns = [];
   pendingPermissions = [];
@@ -2270,7 +2288,10 @@ document.getElementById('send').addEventListener('click', sendPrompt);
 document.getElementById('stop-btn').addEventListener('click', cancelPrompt);
 
 // Start: try loading sessions (discover mode), fall back to direct connect
-loadSessions();
+(async () => {
+  await loadCapabilities();
+  await loadSessions();
+})();
 </script>
 </body>
 </html>

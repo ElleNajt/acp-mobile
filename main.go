@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,10 +59,10 @@ func loadConfig() config {
 
 // command creates an exec.Cmd with extra PATH directories from config.
 func command(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(resolveCommand(name), args...)
 	if len(appConfig.ExtraPath) > 0 {
 		env := os.Environ()
-		extra := strings.Join(appConfig.ExtraPath, ":")
+		extra := strings.Join(appConfig.ExtraPath, string(os.PathListSeparator))
 		found := false
 		for i, e := range env {
 			if strings.HasPrefix(e, "PATH=") {
@@ -76,6 +77,29 @@ func command(name string, args ...string) *exec.Cmd {
 		cmd.Env = env
 	}
 	return cmd
+}
+
+// resolveCommand performs LookPath against the same effective PATH that
+// command() gives child processes. exec.Command looks up PATH before Env is
+// assigned, so using it directly would ignore config.json's extraPath.
+func resolveCommand(name string) string {
+	if filepath.IsAbs(name) || strings.ContainsAny(name, `/\`) {
+		return name
+	}
+	pathValue := os.Getenv("PATH")
+	if len(appConfig.ExtraPath) > 0 {
+		pathValue = strings.Join(append(append([]string{}, appConfig.ExtraPath...), pathValue), string(os.PathListSeparator))
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode()&0111 != 0) {
+			return candidate
+		}
+	}
+	return name
 }
 
 type tailscaleInfo struct {
@@ -251,6 +275,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/sessions", handleSessions)
+	mux.HandleFunc("/api/capabilities", handleCapabilities)
 	mux.HandleFunc("/api/spawn", handleSpawn)
 	mux.HandleFunc("/api/kill", handleKill)
 	mux.HandleFunc("/files/list", handleFileList)
@@ -370,6 +395,31 @@ func main() {
 	} else {
 		select {}
 	}
+}
+
+type capabilities struct {
+	Spawn bool `json:"spawn"`
+	Kill  bool `json:"kill"`
+}
+
+func availableCommand(name string) bool {
+	return command(name).Err == nil
+}
+
+func currentCapabilities() capabilities {
+	return capabilities{
+		Spawn: availableCommand("agent-shell-spawn"),
+		Kill:  availableCommand("emacsclient"),
+	}
+}
+
+func handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(currentCapabilities())
 }
 
 // --- Socket discovery ---
@@ -531,6 +581,10 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !availableCommand("agent-shell-spawn") {
+		http.Error(w, "agent-shell-spawn is not available; session spawning is disabled", http.StatusNotImplemented)
+		return
+	}
 
 	var req struct {
 		Cwd  string `json:"cwd"`
@@ -567,6 +621,10 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 func handleKill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !availableCommand("emacsclient") {
+		http.Error(w, "emacsclient is not available; session killing is disabled", http.StatusNotImplemented)
 		return
 	}
 
