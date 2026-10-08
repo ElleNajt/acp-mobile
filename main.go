@@ -564,6 +564,51 @@ func handleSpawn(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+// findPidByBufferName probes active sockets in parallel and returns the
+// acp-multiplex PID whose session matches bufferName. Returns 0 if not found.
+func findPidByBufferName(bufferName string) int {
+	socks := discoverSockets()
+	if len(socks) == 0 {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	type result struct {
+		pid int
+		buf string
+	}
+	ch := make(chan result, len(socks))
+	for _, s := range socks {
+		s := s
+		go func() {
+			info := probeSocket(s.path, s.pid)
+			ch <- result{s.pid, info.BufferName}
+		}()
+	}
+	for i := 0; i < len(socks); i++ {
+		select {
+		case r := <-ch:
+			if r.buf == bufferName {
+				return r.pid
+			}
+		case <-ctx.Done():
+			return 0
+		}
+	}
+	return 0
+}
+
+// cleanupMultiplexProcess sends SIGTERM to an acp-multiplex process and
+// removes its socket file. Safe to call when the process is already gone.
+func cleanupMultiplexProcess(pid int) {
+	syscall.Kill(pid, syscall.SIGTERM)
+	sockPath := findSocket(strconv.Itoa(pid))
+	if sockPath != "" {
+		os.Remove(sockPath)
+	}
+}
+
 func handleKill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -589,6 +634,13 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Find the acp-multiplex PID before killing the buffer. On standard Emacs
+	// kill-buffer closes the pipe and the process exits naturally; SIGTERM is a
+	// harmless no-op. On Flatpak Emacs (Steam Deck), the host process is
+	// re-parented to init and survives kill-buffer, so the explicit signal is
+	// required to actually clean up the session.
+	pid := findPidByBufferName(req.BufferName)
+
 	// Escape for elisp string
 	escaped := strings.ReplaceAll(req.BufferName, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
@@ -603,8 +655,16 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := strings.TrimSpace(string(out))
-	if result == "nil" {
+	bufferKilled := strings.TrimSpace(string(out)) != "nil"
+
+	// Kill the host process and remove its socket regardless of whether the
+	// Emacs buffer existed. This cleans up both live sessions and stale sockets
+	// left behind by processes that outlived their Emacs buffer.
+	if pid > 0 {
+		cleanupMultiplexProcess(pid)
+	}
+
+	if !bufferKilled && pid == 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "session not found or already closed"})
