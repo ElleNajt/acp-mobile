@@ -71,6 +71,19 @@ body {
   font-family: "SF Mono", Menlo, monospace;
 }
 .session-card .sc-info { flex: 1; min-width: 0; }
+.session-card .sc-checkbox {
+  width: 20px; height: 20px; border: 2px solid #555; border-radius: 4px;
+  display: none; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: pointer;
+}
+.session-card.selecting .sc-checkbox { display: flex; }
+.session-card.selected .sc-checkbox {
+  background: #007AFF; border-color: #007AFF;
+}
+.session-card.selected .sc-checkbox::after {
+  content: "✓"; color: #fff; font-size: 14px; font-weight: bold;
+}
+.session-card.selecting .sc-dot { display: none; }
 .session-card .sc-name {
   font-size: 15px; font-weight: 600; color: #fff;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -127,6 +140,14 @@ body {
   color: #ccc; padding: 6px 10px; font-size: 12px; cursor: pointer;
 }
 #header .files-btn:active { opacity: 0.7; }
+#header .notification-btn {
+  background: transparent; border: 1px solid #555; border-radius: 6px;
+  color: #ccc; padding: 6px 10px; font-size: 14px; cursor: pointer;
+  line-height: 1;
+}
+#header .notification-btn.muted {
+  color: #555; border-color: #333;
+}
 
 /* File browser overlay */
 #file-browser {
@@ -489,6 +510,8 @@ body {
     <span class="nav-title">Sessions</span>
     <button class="nav-btn" id="sort-btn">Recent</button>
     <button class="nav-btn" id="spawn-btn">+</button>
+    <button class="nav-btn" id="select-btn">Select</button>
+    <button class="nav-btn" id="batch-delete-btn" style="display:none;color:#F44336">Delete</button>
     <button class="nav-btn" id="refresh-btn">&#8635;</button>
   </div>
   <div id="nav-list"></div>
@@ -506,6 +529,7 @@ body {
   <div class="header-actions">
     <button class="files-btn" id="files-btn">Files</button>
     <button class="files-btn" id="kill-btn" style="color:#F44336;border-color:#F44336;display:none">Kill</button>
+    <button class="notification-btn" id="notification-btn" title="Toggle Notifications">🔔</button>
   </div>
 </div>
 <div id="file-browser">
@@ -549,9 +573,13 @@ const navigatorEl = document.getElementById('navigator');
 const chatViewEl = document.getElementById('chat-view');
 const navListEl = document.getElementById('nav-list');
 const backBtn = document.getElementById('back-btn');
+const notificationBtn = document.getElementById('notification-btn');
 
 // Derive base path for proxy-safe URLs (e.g. "/app/acp-mobile/" -> "/app/acp-mobile")
 const basePath = location.pathname.replace(/\/$/, '');
+
+let selecting = false;
+let selectedSessions = new Set(); // Set of bufferNames
 
 let ws, nextId = 100, sessionId = null;
 let currentAgentMsg = null;
@@ -563,6 +591,38 @@ let msgIdCounter = 0;
 let projectCwd = null;
 let currentSockPid = null;
 let currentBufferName = null;
+
+// Notification state
+let notificationEnabled = localStorage.getItem('acp-notification') !== 'false';
+function updateNotificationUI() {
+  notificationBtn.classList.toggle('muted', !notificationEnabled);
+  notificationBtn.innerHTML = notificationEnabled ? '🔔' : '🔕';
+}
+notificationBtn.onclick = () => {
+  notificationEnabled = !notificationEnabled;
+  localStorage.setItem('acp-notification', notificationEnabled);
+  updateNotificationUI();
+  if (notificationEnabled) playNotification();
+};
+function playNotification() {
+  if (!notificationEnabled) return;
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.35);
+    setTimeout(() => audioCtx.close(), 400);
+  } catch (e) {}
+}
+updateNotificationUI();
 
 // Permission state
 let pendingPermissions = []; // [{id, element}]
@@ -1546,6 +1606,8 @@ function flushReplay() {
   // (no stopReason response and no available_commands_update seen at the end)
   if (!replayEnded) {
     setProcessing(true);
+  } else {
+    playNotification();
   }
 
   // If there's a pending permission in replay, mark it interactive.
@@ -1555,6 +1617,7 @@ function flushReplay() {
     if (turns[i].type === 'permission') {
       turns[i].interactive = true;
       setProcessing(true);
+      playNotification();
       break;
     }
   }
@@ -1679,6 +1742,11 @@ function handleMessage(msg) {
             if (!messagesEl._toolCalls) messagesEl._toolCalls = {};
             messagesEl._toolCalls[tcId] = el;
           }
+          // Interactive tool call (e.g. Plan exit)
+          if (update.kind === 'switch_mode' && update.rawInput && update.rawInput.plan) {
+            addPlanApprovalButtons(el);
+            playNotification();
+          }
         }
         break;
       }
@@ -1691,6 +1759,13 @@ function handleMessage(msg) {
             updateToolInfo(toolEl, update.title || toolEl.querySelector('.tool-name')?.textContent || '?', update.rawInput || null, toolType(update) || null);
           }
           updateToolStatus(toolEl, update.status || 'completed', toolOutputText(update));
+          // If it becomes interactive in an update
+          if (update.kind === 'switch_mode' && update.rawInput && update.rawInput.plan && !update.status) {
+            if (!toolEl.querySelector('.perm-options')) {
+              addPlanApprovalButtons(toolEl);
+              playNotification();
+            }
+          }
         }
         break;
       }
@@ -1704,12 +1779,14 @@ function handleMessage(msg) {
         currentAgentMsg = null;
         setProcessing(false);
         if (lastSentMsg) { markSent(lastSentMsg); lastSentMsg = null; }
+        playNotification();
         flushMessageQueue();
         break;
 
       case 'available_commands_update':
         if (sessionId) sendBtn.disabled = false;
         setProcessing(false);
+        playNotification();
         flushMessageQueue();
         break;
 
@@ -1726,6 +1803,7 @@ function handleMessage(msg) {
   // Reverse call from agent
   if (msg.method === 'session/request_permission' && msg.id !== undefined) {
     addPermissionMsg(msg, true);
+    playNotification();
     return;
   }
   if (msg.method && msg.id !== undefined) {
@@ -2076,9 +2154,11 @@ function sessionDisplayName(s) {
 
 function makeSessionCard(s, name) {
   const unread = isUnread(s);
+  const isSelected = selectedSessions.has(s.bufferName);
   const d = document.createElement('div');
-  d.className = 'session-card' + (unread ? ' unread' : '');
+  d.className = 'session-card' + (unread ? ' unread' : '') + (selecting ? ' selecting' : '') + (isSelected ? ' selected' : '');
   d.innerHTML =
+    '<div class="sc-checkbox"></div>' +
     '<div class="sc-dot"></div>' +
     '<div class="sc-info">' +
       '<div class="sc-name">' + escHtml(name) + '</div>' +
@@ -2090,10 +2170,67 @@ function makeSessionCard(s, name) {
     del.className = 'sc-delete';
     del.textContent = '\u00d7';
     del.onclick = (e) => { e.stopPropagation(); killSessionByName(s.bufferName); };
+    if (selecting) del.style.display = 'none';
     d.appendChild(del);
   }
-  d.onclick = () => selectSession(s);
+  d.onclick = () => {
+    if (selecting) {
+      if (s.bufferName) toggleSessionSelection(s.bufferName, d);
+    } else {
+      selectSession(s);
+    }
+  };
   return d;
+}
+
+function toggleSessionSelection(bufferName, el) {
+  if (selectedSessions.has(bufferName)) {
+    selectedSessions.delete(bufferName);
+    el.classList.remove('selected');
+  } else {
+    selectedSessions.add(bufferName);
+    el.classList.add('selected');
+  }
+  updateBatchButtons();
+}
+
+function toggleSelecting() {
+  selecting = !selecting;
+  if (!selecting) selectedSessions.clear();
+  document.getElementById('select-btn').textContent = selecting ? 'Cancel' : 'Select';
+  document.getElementById('batch-delete-btn').style.display = selecting ? '' : 'none';
+  document.getElementById('spawn-btn').style.display = selecting ? 'none' : '';
+  updateBatchButtons();
+  renderSessions(lastSessions);
+}
+
+function updateBatchButtons() {
+  const btn = document.getElementById('batch-delete-btn');
+  btn.disabled = selectedSessions.size === 0;
+  btn.textContent = selectedSessions.size > 0 ? 'Delete (' + selectedSessions.size + ')' : 'Delete';
+}
+
+async function batchDelete() {
+  if (selectedSessions.size === 0) return;
+  if (!window.confirm('Kill ' + selectedSessions.size + ' selected sessions?')) return;
+
+  const bufferNames = [...selectedSessions];
+  try {
+    const resp = await fetch(basePath + '/api/kill-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bufferNames })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Batch kill failed: ' + data.error);
+    }
+    selectedSessions.clear();
+    toggleSelecting();
+    loadSessions();
+  } catch (err) {
+    alert('Batch kill failed: ' + err.message);
+  }
 }
 
 function selectSession(session) {
@@ -2256,6 +2393,8 @@ async function killSessionByName(bufferName) {
 // Wire up event listeners (no inline onclick for CSP compatibility)
 document.getElementById('sort-btn').addEventListener('click', toggleSort);
 document.getElementById('spawn-btn').addEventListener('click', spawnAgent);
+document.getElementById('select-btn').addEventListener('click', toggleSelecting);
+document.getElementById('batch-delete-btn').addEventListener('click', batchDelete);
 document.getElementById('refresh-btn').addEventListener('click', loadSessions);
 document.getElementById('back-btn').addEventListener('click', navigateBack);
 document.getElementById('mode-btn').addEventListener('click', cycleMode);

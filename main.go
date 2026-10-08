@@ -253,6 +253,7 @@ func main() {
 	mux.HandleFunc("/api/sessions", handleSessions)
 	mux.HandleFunc("/api/spawn", handleSpawn)
 	mux.HandleFunc("/api/kill", handleKill)
+	mux.HandleFunc("/api/kill-batch", handleKillBatch)
 	mux.HandleFunc("/files/list", handleFileList)
 	mux.HandleFunc("/files/read", handleFileRead)
 
@@ -612,6 +613,44 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func handleKillBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		BufferNames []string `json:"bufferNames"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var errs []string
+	for _, bufferName := range req.BufferNames {
+		if !validBufferName.MatchString(bufferName) {
+			errs = append(errs, fmt.Sprintf("invalid buffer name: %s", bufferName))
+			continue
+		}
+		escaped := strings.ReplaceAll(bufferName, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		expr := fmt.Sprintf(`(meta-agent-shell-close-session "%s")`, escaped)
+		out, err := command("emacsclient", "--eval", expr).CombinedOutput()
+		if err != nil {
+			log.Printf("kill-batch: %v: %s", err, out)
+			errs = append(errs, fmt.Sprintf("%s: %v", bufferName, err))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if len(errs) > 0 {
+		json.NewEncoder(w).Encode(map[string]string{"error": strings.Join(errs, "; ")})
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
